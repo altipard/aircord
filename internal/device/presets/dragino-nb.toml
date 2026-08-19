@@ -1,0 +1,51 @@
+# Starting-point control panel for Dragino NB-IoT sensors (D20-NB, D23-NB,
+# WQS-NB). This ships inside the binary as a preset. To customise, copy this file
+# into your config dir — …/aircord/templates/ — and edit there; a file with the
+# same `name` overrides this preset.
+#
+# The commands below are sensible defaults for these devices, but AT syntax
+# varies by firmware — verify against your device's manual before relying on the
+# set/band actions.
+#
+# Set `confirm = true` on anything a user would not want to trigger with a stray
+# click on a device that is already deployed. The panel then asks first.
+
+name  = "Dragino NB-IoT"
+match = "(?i)^(d20|d23|wqs)"
+
+[[action]]
+label = "Show configuration"
+cmd   = "AT+CFG"
+type  = "button"
+
+[[action]]
+label = "Firmware version"
+cmd   = "AT+VER"
+type  = "read"
+parse = "([0-9]+\\.[0-9]+\\.[0-9]+)"
+
+[[action]]
+label = "Uplink interval (seconds)"
+cmd   = "AT+TDC=<seconds>"
+type  = "input"
+
+# Changing the band can take the device off the network until it is set back.
+[[action]]
+label   = "NB-IoT band (Germany)"
+type    = "select"
+confirm = true
+
+  [[action.options]]
+  text = "B8 (900 MHz)"
+  cmd  = "AT+QBAND=1,8"
+
+  [[action.options]]
+  text = "B20 (800 MHz)"
+  cmd  = "AT+QBAND=1,20"
+
+# Restarts the device: the link drops and the sensor re-joins the network.
+[[action]]
+label   = "Reboot device"
+cmd     = "ATZ"
+type    = "button"
+confirm = true

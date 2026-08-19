@@ -1,0 +1,74 @@
+name: Release
+
+# Tag a commit (e.g. `git tag v1.0.0 && git push origin v1.0.0`) to build native
+# packages for Linux, Windows and macOS and attach them to a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            asset: ble-console-linux-amd64.tar.xz
+          - runner: windows-latest
+            os: windows
+            asset: ble-console-windows-amd64.exe
+          - runner: macos-latest
+            os: darwin
+            asset: ble-console-macos-arm64.app.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      # Fyne needs OpenGL / X11 headers to compile on Linux.
+      - name: Install Linux GUI build deps
+        if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Install fyne CLI
+        run: go install fyne.io/tools/cmd/fyne@latest
+
+      # Native package (host OS == target OS on each runner). Unsigned; macOS
+      # users right-click → Open on first launch.
+      - name: Package
+        run: fyne package
+
+      - name: Collect artifact
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          case "${{ matrix.os }}" in
+            linux)
+              mv ./*.tar.xz "dist/${{ matrix.asset }}"
+              ;;
+            windows)
+              mv ./*.exe "dist/${{ matrix.asset }}"
+              ;;
+            darwin)
+              apps=(./*.app)
+              ditto -c -k --keepParent "${apps[0]}" "dist/${{ matrix.asset }}"
+              ;;
+          esac
+          ls -la dist
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.asset }}

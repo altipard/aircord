@@ -1,0 +1,8 @@
+# Packaging metadata for `fyne package` (used by the release pipeline).
+# Note: the fyne CLI rewrites this file and increments Build on every run.
+[Details]
+  Icon = "assets/icon.png"
+  Name = "Aircord"
+  ID = "com.altipard.aircord"
+  Version = "1.0.0"
+  Build = 1

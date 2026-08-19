@@ -1,0 +1,38 @@
+# Build output
+/bin/
+/aircord
+# Legacy binary names (pre-rename)
+/blescan
+/blescan-app
+/ble-console
+
+# Packaging output (fyne package / release workflow)
+/dist/
+*.app/
+*.tar.xz
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+vendor/
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# App runtime data (also lives under the OS config dir, but ignore any local copy)
+/logs/
+
+# Local AI tooling state — never publish
+_bmad/
+.claude/
+.planning/

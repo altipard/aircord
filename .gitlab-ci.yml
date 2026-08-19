@@ -1,0 +1,168 @@
+# Aircord CI — https://docs.gitlab.com/ee/ci/
+#
+# check    runs on every push: the same gate as `task check`
+# package  runs on tags: native packages per platform
+# release  runs on tags: creates the GitLab Release
+#
+# Packaging is native per platform — Fyne cross-compilation needs a CGO
+# toolchain per target, which is more machinery than it is worth here. The Linux
+# package builds on the shared runners everyone has. macOS and Windows need
+# GitLab SaaS runners, which are opt-in per project, so those jobs are manual:
+# start them from the pipeline view once the tag is pushed. See README for which
+# platforms are actually runtime-tested.
+
+stages: [check, package, release]
+
+variables:
+  GO_VERSION: "1.25"
+  GOPATH: $CI_PROJECT_DIR/.go
+  GOTOOLCHAIN: local
+  # Where tagged packages are published, and where the release links point.
+  PKG_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aircord/${CI_COMMIT_TAG}"
+
+.go-linux:
+  image: golang:${GO_VERSION}-bookworm
+  before_script:
+    # Fyne needs OpenGL and X11 headers to compile on Linux.
+    - apt-get update -qq
+    - apt-get install -y -qq libgl1-mesa-dev xorg-dev >/dev/null
+  cache:
+    key: "go-mod-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .go/pkg/mod
+
+fmt:
+  extends: .go-linux
+  stage: check
+  script:
+    - test -z "$(gofmt -l .)" || { echo 'gofmt needed:'; gofmt -l .; exit 1; }
+
+vet:
+  extends: .go-linux
+  stage: check
+  script:
+    - go vet ./...
+
+test:
+  extends: .go-linux
+  stage: check
+  script:
+    - go test ./...
+
+build:
+  extends: .go-linux
+  stage: check
+  script:
+    - go build ./...
+
+lint:
+  extends: .go-linux
+  stage: check
+  script:
+    - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
+  allow_failure: true
+
+# ---------------------------------------------------------------- packaging --
+
+.package-rules:
+  rules:
+    - if: $CI_COMMIT_TAG
+
+package:linux:
+  extends:
+    - .go-linux
+    - .package-rules
+  stage: package
+  variables:
+    ASSET: "aircord-linux-amd64.tar.xz"
+  script:
+    - go install fyne.io/tools/cmd/fyne@latest
+    - $GOPATH/bin/fyne package
+    - mkdir -p dist && mv ./*.tar.xz "dist/${ASSET}"
+    - |
+      curl --fail --silent --show-error \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --upload-file "dist/${ASSET}" \
+        "${PKG_URL}/${ASSET}"
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+# Needs GitLab SaaS macOS runners enabled for the project. This is the only
+# platform whose runtime is actually tested, so run it for every release.
+package:macos:
+  extends: .package-rules
+  stage: package
+  tags: [saas-macos-medium-m1]
+  image: macos-14-xcode-15
+  when: manual
+  allow_failure: true
+  variables:
+    ASSET: "aircord-macos-arm64.app.zip"
+  before_script:
+    - brew install go@${GO_VERSION} || brew install go
+  script:
+    - go install fyne.io/tools/cmd/fyne@latest
+    - "$(go env GOPATH)/bin/fyne package"
+    # The .app is unsigned; users right-click -> Open on first launch.
+    - mkdir -p dist
+    - ditto -c -k --keepParent ./*.app "dist/${ASSET}"
+    - |
+      curl --fail --silent --show-error \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --upload-file "dist/${ASSET}" \
+        "${PKG_URL}/${ASSET}"
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+# Needs GitLab SaaS Windows runners enabled for the project. Unverified at
+# runtime — see README.
+package:windows:
+  extends: .package-rules
+  stage: package
+  tags: [saas-windows-medium-amd64]
+  when: manual
+  allow_failure: true
+  variables:
+    ASSET: "aircord-windows-amd64.exe"
+  script:
+    - choco install golang --version=$env:GO_VERSION -y --no-progress
+    - go install fyne.io/tools/cmd/fyne@latest
+    - fyne package
+    - New-Item -ItemType Directory -Force -Path dist
+    - Move-Item ./*.exe "dist/$env:ASSET"
+    - |
+      curl.exe --fail --silent --show-error `
+        --header "JOB-TOKEN: $env:CI_JOB_TOKEN" `
+        --upload-file "dist/$env:ASSET" `
+        "$env:PKG_URL/$env:ASSET"
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+# ------------------------------------------------------------------ release --
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: package:linux
+      artifacts: false
+  script:
+    - echo "Publishing release ${CI_COMMIT_TAG}"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Aircord $CI_COMMIT_TAG"
+    description: |
+      Packages for this release are in the
+      [package registry]($CI_PROJECT_URL/-/packages).
+
+      The macOS app is unsigned — right-click → *Open* on first launch.
+      Linux and Windows builds are provided but their runtime is unverified.
+    assets:
+      links:
+        - name: "Linux (amd64, .tar.xz)"
+          url: "${PKG_URL}/aircord-linux-amd64.tar.xz"
