@@ -21,7 +21,7 @@ task lint     # golangci-lint only
 No `task`? The equivalents are `go run .`, `go vet ./...`, `go test ./...`, and
 `gofmt -l .` (must print nothing).
 
-Run `task check` before opening a merge request — CI runs the same gate.
+Run `task check` before opening a pull request — CI runs the same gate.
 
 ## Code layout
 
@@ -55,7 +55,7 @@ trailing period. Add a body when the *why* isn't obvious.
 
 ## Merge requests
 
-- Branch off `main`; keep merge requests focused.
+- Branch off `main`; keep pull requests focused.
 - Ensure `task check` passes.
 - Describe what changed and how you verified it. GUI and BLE behaviour cannot be
   exercised in CI, so state which device you tested against, or say that you did
@@ -92,5 +92,5 @@ write/notify UUIDs to `uartProfiles` in `internal/ble/ble.go`.
 A control panel for the device is a
 [device template](docs/device-templates.md) — a TOML file. Templates that are
 broadly useful can ship as presets in `internal/device/presets/`. Mark anything
-destructive with `confirm = true`, and say in the merge request which firmware
+destructive with `confirm = true`, and say in the pull request which firmware
 revision you verified the AT syntax against.

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/config"
+	"github.com/altipard/aircord/internal/config"
 )
 
 //go:embed presets/*.toml

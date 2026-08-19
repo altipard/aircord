@@ -9,8 +9,8 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/ble"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/filter"
+	"github.com/altipard/aircord/internal/ble"
+	"github.com/altipard/aircord/internal/filter"
 )
 
 // Device-table columns, in display order.

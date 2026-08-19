@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/config"
+	"github.com/altipard/aircord/internal/config"
 )
 
 // DeviceSnapshot is one discovered device as recorded at save time. The address

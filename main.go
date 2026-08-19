@@ -29,7 +29,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/config"
+	"github.com/altipard/aircord/internal/config"
 )
 
 func main() {

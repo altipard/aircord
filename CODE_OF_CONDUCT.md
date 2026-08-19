@@ -20,13 +20,13 @@ publishing others' private information without permission.
 
 ## Scope
 
-This applies in the issue tracker, merge requests, commit messages, and any
+This applies in the issue tracker, pull requests, commit messages, and any
 other project space.
 
 ## Enforcement
 
-Report problems to the maintainer via a
-[confidential issue](https://gitlab.com/zilicon-it-services/petriheil/aircord/-/issues/new).
+Report problems privately to the maintainer — see
+[SECURITY.md](SECURITY.md) for the private reporting channels.
 Reports are handled privately. Consequences range from a request to change
 behaviour up to a block from the project, depending on severity.
 

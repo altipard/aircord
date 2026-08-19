@@ -8,8 +8,8 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/device"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/playbook"
+	"github.com/altipard/aircord/internal/device"
+	"github.com/altipard/aircord/internal/playbook"
 )
 
 // dialogChrome is roughly the vertical space a dialog spends on its own title

@@ -2,10 +2,9 @@
 
 ## Reporting a vulnerability
 
-Report security issues privately, not as a public issue. Open a
-[confidential issue](https://gitlab.com/zilicon-it-services/petriheil/aircord/-/issues/new)
-— tick **This issue is confidential** — or email the maintainer listed in
-`git log`.
+Report security issues privately, not as a public issue. Use
+[private vulnerability reporting](https://github.com/altipard/aircord/security/advisories/new)
+or email the maintainer listed in `git log`.
 
 Please include what you did, what happened, and the affected version. Expect an
 acknowledgement within a week.

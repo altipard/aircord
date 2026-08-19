@@ -1,4 +1,4 @@
-module gitlab.com/zilicon-it-services/petriheil/aircord
+module github.com/altipard/aircord
 
 go 1.25
 

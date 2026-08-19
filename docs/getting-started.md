@@ -3,11 +3,11 @@
 ## Install
 
 Download the package for your platform from the
-[releases page](https://gitlab.com/zilicon-it-services/petriheil/aircord/-/releases),
+[releases page](https://github.com/altipard/aircord/releases),
 or build from source:
 
 ```sh
-git clone https://gitlab.com/zilicon-it-services/petriheil/aircord.git
+git clone https://github.com/altipard/aircord.git
 cd aircord
 go run .
 ```

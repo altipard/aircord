@@ -8,11 +8,11 @@ import (
 
 	"tinygo.org/x/bluetooth"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/ble"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/device"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/history"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/playbook"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/session"
+	"github.com/altipard/aircord/internal/ble"
+	"github.com/altipard/aircord/internal/device"
+	"github.com/altipard/aircord/internal/history"
+	"github.com/altipard/aircord/internal/playbook"
+	"github.com/altipard/aircord/internal/session"
 )
 
 // scanner owns the UI-thread state and widgets and drives a ble.Client for all

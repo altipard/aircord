@@ -6,7 +6,6 @@
 
 **The serial console for devices that no longer have a serial port.**
 
-[![pipeline](https://gitlab.com/zilicon-it-services/petriheil/aircord/badges/main/pipeline.svg)](https://gitlab.com/zilicon-it-services/petriheil/aircord/-/pipelines)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -65,7 +64,7 @@ Built with [Fyne](https://fyne.io) and
 ## Download
 
 Packages for macOS, Linux and Windows are attached to each
-[tagged release](https://gitlab.com/zilicon-it-services/petriheil/aircord/-/releases).
+[tagged release](https://github.com/altipard/aircord/releases).
 The macOS app is unsigned — right-click → *Open* on first launch.
 
 ## Build and run

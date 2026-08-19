@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/config"
+	"github.com/altipard/aircord/internal/config"
 )
 
 // Step is one command in a playbook, an optional reply pattern to wait for after

@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/config"
+	"github.com/altipard/aircord/internal/config"
 )
 
 const maxPerDevice = 300 // cap stored commands per address

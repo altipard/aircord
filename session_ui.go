@@ -8,8 +8,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/ble"
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/session"
+	"github.com/altipard/aircord/internal/ble"
+	"github.com/altipard/aircord/internal/session"
 )
 
 // showModal presents a dialog built by build, which receives a close func so an

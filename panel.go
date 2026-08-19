@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/device"
+	"github.com/altipard/aircord/internal/device"
 )
 
 const noTemplate = "— no template —"

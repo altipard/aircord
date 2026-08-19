@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/playbook"
+	"github.com/altipard/aircord/internal/playbook"
 )
 
 // waitTimeout bounds how long a step with a "?<pattern>" reply-wait may take.

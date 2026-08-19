@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/ble"
+	"github.com/altipard/aircord/internal/ble"
 )
 
 func TestIndexOfAddr(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 
 	"fyne.io/fyne/v2"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/config"
+	"github.com/altipard/aircord/internal/config"
 )
 
 const (

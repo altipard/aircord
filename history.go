@@ -5,7 +5,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
-	"gitlab.com/zilicon-it-services/petriheil/aircord/internal/filter"
+	"github.com/altipard/aircord/internal/filter"
 )
 
 // filterCmds keeps commands matching the filter (see filter.Match for the
