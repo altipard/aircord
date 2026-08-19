@@ -35,7 +35,9 @@ fmt:
   extends: .go-linux
   stage: check
   script:
-    - test -z "$(gofmt -l .)" || { echo 'gofmt needed:'; gofmt -l .; exit 1; }
+    # Only tracked files — the module cache lives under .go/ in the project dir.
+    - unformatted=$(git ls-files '*.go' | xargs -r gofmt -l)
+    - test -z "$unformatted" || { echo 'gofmt needed:'; echo "$unformatted"; exit 1; }
 
 vet:
   extends: .go-linux
