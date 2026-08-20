@@ -83,6 +83,13 @@ type Client struct {
 	// (serialized) notify goroutine; Connect resets it before enabling
 	// notifications so there is no cross-goroutine access.
 	rxBuf []byte
+
+	// tap, when non-nil, receives every reassembled notify line in addition to
+	// the Events log. An OTA session installs it to await bootloader replies. See
+	// ota.go. Guarded by tapMu because it is set on the caller thread and read on
+	// the notify goroutine.
+	tapMu sync.Mutex
+	tap   chan string
 }
 
 // New returns a Client bound to the default adapter, reporting to events.
@@ -343,8 +350,19 @@ func (c *Client) onConnectChange(_ bluetooth.Device, connected bool) {
 func (c *Client) onNotify(data []byte) {
 	var lines []string
 	c.rxBuf, lines = appendLines(c.rxBuf, data)
+	c.tapMu.Lock()
+	tap := c.tap
+	c.tapMu.Unlock()
 	for _, line := range lines {
 		c.events.Log("<< " + line)
+		if tap != nil {
+			// Non-blocking: never stall the BLE goroutine on a slow consumer. The
+			// buffer is sized for a lock-step request/response protocol.
+			select {
+			case tap <- line:
+			default:
+			}
+		}
 	}
 }
 
