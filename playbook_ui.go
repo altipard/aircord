@@ -39,6 +39,10 @@ func (s *scanner) runPlaybook(pb playbook.Playbook) {
 		s.alert.warn("not connected — connect to a device first")
 		return
 	}
+	if s.otaRunning {
+		s.alert.warn("a firmware update is running — the link belongs to the bootloader")
+		return
+	}
 	if len(pb.Steps) == 0 {
 		s.alert.warn("playbook has no steps")
 		return

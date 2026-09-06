@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"tinygo.org/x/bluetooth"
 )
@@ -41,6 +42,10 @@ type Device struct {
 	Addr    string
 	Name    string
 	RSSI    int16
+	// Seen is when the latest advertisement arrived. A waiter that needs a
+	// device to appear *after* some event (a reset into the bootloader, say)
+	// compares against it, so a stale entry from before cannot satisfy it.
+	Seen time.Time
 }
 
 // Events receives BLE activity. All methods may be called from internal BLE
@@ -135,6 +140,7 @@ func (c *Client) record(address bluetooth.Address, addr, name string, rssi int16
 	}
 	prev.Address = address
 	prev.RSSI = rssi
+	prev.Seen = time.Now()
 	if name != "" {
 		prev.Name = name
 	}

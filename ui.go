@@ -170,6 +170,7 @@ func (s *scanner) buildScanRow() fyne.CanvasObject {
 	right := container.NewHBox(
 		widget.NewButton("Sessions", s.openSessions),
 		widget.NewButton("Playbooks", s.openPlaybooks),
+		widget.NewButton("Firmware", s.openFirmware),
 		widget.NewButton("Clear list", s.clearList),
 	)
 	// Scan goes in the left slot, not the centre. A Border's centre stretches to

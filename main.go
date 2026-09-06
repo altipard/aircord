@@ -23,6 +23,8 @@
 //   - ui.go         widget construction + layout
 //   - widgets.go    reusable UI pieces (dark theme, table-fill layout)
 //   - history.go    fzf-style command history picker
+//   - ota_ui.go     firmware update: reset into the bootloader, reconnect, flash
+//   - internal/otanb  NB bootloader flash protocol (frames, CRC, upgrade sequence)
 package main
 
 import (

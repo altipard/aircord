@@ -44,6 +44,10 @@ func (s *scanner) connect() {
 	if s.ble.IsConnected() {
 		return
 	}
+	if s.otaRunning {
+		s.alert.warn("a firmware update is running — it connects to the bootloader itself")
+		return
+	}
 	if !s.hasSel {
 		s.alert.warn("select a device in the list first")
 		return

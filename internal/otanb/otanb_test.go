@@ -229,10 +229,8 @@ func (d *fakeDevice) Roundtrip(line string, _ time.Duration) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	status := byte(StatusOK)
-	if d.forceError != 0 {
-		status = d.forceError
-	} else {
+	status := d.forceError
+	if status == 0 {
 		status = d.handle(req)
 	}
 	reply, err := buildFrame(status, nil, d.password)
