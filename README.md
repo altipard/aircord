@@ -39,6 +39,9 @@ Built with [Fyne](https://fyne.io) and
   are then confirmed before they fire. See [Device templates](docs/device-templates.md).
 - **Playbooks** — replay a provisioning sequence, waiting for each device
   acknowledgement before moving on. See [Playbooks](docs/playbooks.md).
+- **Firmware update** — flash a Dragino NB-IoT node over BLE: reset it into
+  its bootloader, catch the IMEI advertisement, erase, flash, verify, reboot.
+  See [Firmware update](docs/firmware-update.md).
 - **Sessions** — save and restore the device list, selected target and template.
 - **Log tools** — copy the transcript or save it to a timestamped file.
 - **Resilient link handling** — device resets and out-of-range drops are
@@ -52,6 +55,7 @@ Built with [Fyne](https://fyne.io) and
 | [Provisioning a sensor](docs/provisioning.md) | End-to-end field workflow |
 | [Playbooks](docs/playbooks.md) | Command sequences and their syntax |
 | [Device templates](docs/device-templates.md) | Building a control panel in TOML |
+| [Firmware update](docs/firmware-update.md) | Flashing a Dragino NB node over BLE |
 | [Troubleshooting](docs/troubleshooting.md) | When it doesn't connect or reply |
 
 ## Requirements
@@ -137,6 +141,7 @@ split into `internal/` packages, each unit-tested.
 | `panel.go` | control panel rendered from a device template |
 | `session_ui.go` | modal helper, session save/load dialog |
 | `playbook_ui.go` | playbook editor and runner |
+| `ota_ui.go` | firmware update: reset into the bootloader, reconnect, flash |
 | `terminal.go` | terminal log, alerts and status line |
 | `ui.go` | widget construction + layout |
 | `widgets.go` | reusable UI pieces (dark theme, alert line, table layout) |
@@ -146,6 +151,7 @@ split into `internal/` packages, each unit-tested.
 | `internal/device` | device template parsing and preset loading |
 | `internal/filter` | shared regex/substring filter |
 | `internal/history` | per-device command history persistence |
+| `internal/otanb` | Dragino NB bootloader flash protocol (frames, CRC, upgrade sequence) |
 | `internal/playbook` | playbook persistence, text format, risky-command detection |
 | `internal/session` | session persistence |
 | `assets/icon.svg` | editable icon source (regen: `go run ./tools/genicon`) |

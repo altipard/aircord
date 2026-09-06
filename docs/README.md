@@ -6,6 +6,7 @@
 | [Provisioning a sensor](provisioning.md) | You are about to configure a device for deployment |
 | [Playbooks](playbooks.md) | You want to replay the same command sequence reliably |
 | [Device templates](device-templates.md) | You want buttons instead of AT syntax for your hardware |
+| [Firmware update](firmware-update.md) | You want to flash a new firmware onto a Dragino NB node over BLE |
 | [Troubleshooting](troubleshooting.md) | Something does not show up, connect, or answer |
 
 Project overview and build instructions live in the
@@ -23,6 +24,8 @@ buttons, and playbooks do it as a scripted sequence.
 Scan  →  select device  →  Connect  →  ┬─ type AT commands in the console
                                        ├─ press buttons in the control panel
                                        └─ run a playbook
+
+Firmware  →  reset node  →  catch its bootloader  →  erase, flash, verify, reboot
 ```
 
 Nothing is sent to the device that you did not trigger, with one exception: the

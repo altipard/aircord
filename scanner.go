@@ -87,6 +87,15 @@ type scanner struct {
 	// acknowledgements without going through the UI thread.
 	tapMu   sync.Mutex
 	lineTap func(line string)
+
+	// firmware update (see ota_ui.go; UI-thread only). otaImage is the last
+	// chosen .bin, otaIMEI the last node named, so a retry does not start from
+	// an empty dialog. otaRunning keeps a second update — and a manual Connect —
+	// off a link the updater owns.
+	otaImage   []byte
+	otaFile    string
+	otaIMEI    string
+	otaRunning bool
 }
 
 // setLineTap installs (or, with nil, removes) the reply-line tap.
