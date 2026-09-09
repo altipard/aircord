@@ -31,8 +31,8 @@ jobs:
             asset: ble-console-macos-arm64.app.zip
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
@@ -69,6 +69,6 @@ jobs:
           ls -la dist
 
       - name: Attach to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/${{ matrix.asset }}
