@@ -1,17 +1,21 @@
 name: Release
 
-# Tag a commit (e.g. `git tag v1.0.0 && git push origin v1.0.0`) to build native
-# packages for Linux, Windows and macOS and attach them to a GitHub Release.
+# Tag a commit (e.g. `git tag v1.0.0 && git push github v1.0.0`) to build native
+# packages for Linux, Windows and macOS and publish them as a GitHub Release.
+# Tags with a suffix (v1.1.0-rc1) become pre-releases.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 defaults:
   run:
     shell: bash
+
+env:
+  FYNE_TOOLS_VERSION: v1.7.4
 
 jobs:
   package:
@@ -22,13 +26,16 @@ jobs:
         include:
           - runner: ubuntu-latest
             os: linux
-            asset: ble-console-linux-amd64.tar.xz
+            arch: amd64
+            ext: tar.xz
           - runner: windows-latest
             os: windows
-            asset: ble-console-windows-amd64.exe
+            arch: amd64
+            ext: exe
           - runner: macos-latest
-            os: darwin
-            asset: ble-console-macos-arm64.app.zip
+            os: macos
+            arch: arm64
+            ext: app.zip
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -43,32 +50,60 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
 
       - name: Install fyne CLI
-        run: go install fyne.io/tools/cmd/fyne@latest
+        run: go install "fyne.io/tools/cmd/fyne@${FYNE_TOOLS_VERSION}"
 
-      # Native package (host OS == target OS on each runner). Unsigned; macOS
-      # users right-click → Open on first launch.
+      # Native package (host OS == target OS on each runner). Version comes from
+      # the tag, not FyneApp.toml. Unsigned; macOS users right-click → Open on
+      # first launch.
       - name: Package
-        run: fyne package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          fyne package --release \
+            --app-version "${version%%-*}" \
+            --app-build "${{ github.run_number }}"
 
       - name: Collect artifact
+        id: collect
         run: |
           set -euo pipefail
+          asset="aircord-${GITHUB_REF_NAME}-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.ext }}"
           mkdir -p dist
           case "${{ matrix.os }}" in
-            linux)
-              mv ./*.tar.xz "dist/${{ matrix.asset }}"
-              ;;
-            windows)
-              mv ./*.exe "dist/${{ matrix.asset }}"
-              ;;
-            darwin)
+            linux)   mv ./*.tar.xz "dist/${asset}" ;;
+            windows) mv ./*.exe "dist/${asset}" ;;
+            macos)
               apps=(./*.app)
-              ditto -c -k --keepParent "${apps[0]}" "dist/${{ matrix.asset }}"
+              ditto -c -k --keepParent "${apps[0]}" "dist/${asset}"
               ;;
           esac
           ls -la dist
+          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
 
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
         with:
-          files: dist/${{ matrix.asset }}
+          name: ${{ steps.collect.outputs.asset }}
+          path: dist/${{ steps.collect.outputs.asset }}
+          if-no-files-found: error
+
+  # One job creates the release so the matrix jobs don't race on it.
+  release:
+    name: publish release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum aircord-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
