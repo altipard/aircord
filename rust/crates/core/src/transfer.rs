@@ -634,11 +634,13 @@ mod tests {
     #[test]
     fn a_late_ok_is_not_taken_for_the_next_command() {
         let link = device();
-        let wait = Duration::from_millis(300);
-        // TDC answers after its wait is over; SHTEMP refuses, but more slowly than TDC's late OK arrives. Without the
-        // pause after a silence, that OK would be read as SHTEMP's.
-        link.reply_late("AT+TDC=1800", Duration::from_millis(450), &["OK"]);
-        link.reply_late("AT+SHTEMP=20,30", Duration::from_millis(200), &["AT_PARAM_ERROR"]);
+        let wait = Duration::from_millis(800);
+        // TDC answers half a wait after its wait is over, in the middle of the pause that follows a silence. SHTEMP
+        // refuses, and the fake answers in order, so its refusal never comes before TDC's late OK: without the pause,
+        // that OK would be read as SHTEMP's, however the threads are scheduled. Only a TDC reply delayed by more than
+        // half a wait (400 ms) beyond its schedule could miss the pause.
+        link.reply_late("AT+TDC=1800", wait + wait / 2, &["OK"]);
+        link.reply_late("AT+SHTEMP=20,30", Duration::ZERO, &["AT_PARAM_ERROR"]);
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
         let out = apply(&link, &s31_template(), &changes, wait, &AtomicBool::new(false), &mut |_| {});
         assert_eq!(out.fields[1].status, Status::Failed { why: "Das Gerät hat den Wert abgelehnt (AT_PARAM_ERROR).".into() });

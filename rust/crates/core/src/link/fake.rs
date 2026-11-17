@@ -46,6 +46,8 @@ struct State {
     drops: BTreeSet<String>,
     /// Replies by exact command that come only after a delay, from another thread.
     late: BTreeMap<String, (Duration, Vec<String>)>,
+    /// The thread of the latest late reply; the next one waits for it, so late replies keep the order of their commands.
+    late_last: Option<std::thread::JoinHandle<()>>,
 }
 
 /// The fake link. Everything happens inline, on the caller's thread.
@@ -107,7 +109,8 @@ impl FakeLink {
         lock(&self.state).drops.insert(key.into());
     }
 
-    /// `cmd` is answered with `lines`, but only `after` it was sent.
+    /// `cmd` is answered with `lines`, but only `after` it was sent, and never before the late reply of a command sent
+    /// earlier: a serial console answers in order.
     pub fn reply_late(&self, cmd: &str, after: Duration, lines: &[&str]) {
         lock(&self.state).late.insert(cmd.into(), (after, lines.iter().map(|l| l.to_string()).collect()));
     }
@@ -236,13 +239,18 @@ impl FakeLink {
         let late = lock(&self.state).late.get(line.trim_end_matches(['\r', '\n'])).cloned();
         if let Some((after, lines)) = late {
             let (taps, events) = (self.taps.clone(), self.events());
-            std::thread::spawn(move || {
+            let earlier = lock(&self.state).late_last.take();
+            let handle = std::thread::spawn(move || {
                 std::thread::sleep(after);
+                if let Some(earlier) = earlier {
+                    let _ = earlier.join();
+                }
                 for l in lines {
                     events.log(&format!("<< {}", redact_line(&l, &[])));
                     taps.feed(&l);
                 }
             });
+            lock(&self.state).late_last = Some(handle);
         }
         self.deliver(replies, resets);
         true
