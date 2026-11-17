@@ -320,11 +320,13 @@ impl App {
         Panel::left("rail").frame(widgets::chrome(Margin::symmetric(9, 10))).resizable(false).exact_size(52.0).show(ui, |ui| self.rail(ui));
         // The dock: the cards sit on it 8 pt apart, as PhotoCraft's panels do.
         let dock = |m: Margin| Frame::new().fill(pal().dock).inner_margin(m);
+        // The docks start narrower in a small window, so the terminal keeps room beside them.
+        let room = ui.available_width();
         Panel::left("devices")
             .frame(dock(Margin { left: 8, right: 4, top: 8, bottom: 8 }))
             .show_separator_line(false)
             .resizable(true)
-            .default_size(330.0)
+            .default_size((room * 0.28).clamp(260.0, 330.0))
             .min_size(260.0)
             .show(ui, |ui| {
                 widgets::card().show(ui, |ui| self.devices_panel(ui));
@@ -333,7 +335,7 @@ impl App {
             .frame(dock(Margin { left: 4, right: 8, top: 8, bottom: 8 }))
             .show_separator_line(false)
             .resizable(true)
-            .default_size(300.0)
+            .default_size((room * 0.26).clamp(240.0, 300.0))
             .min_size(240.0)
             .show(ui, |ui| {
                 widgets::card().show(ui, |ui| {
@@ -844,6 +846,8 @@ impl App {
                 Conn::Connecting => "connecting…".into(),
                 Conn::Idle => "offline".into(),
             };
+            // A narrow column keeps the title and the tools; the detail is in the status bar too.
+            let detail = if ui.available_width() < 320.0 { String::new() } else { detail };
             widgets::doc_tab(ui, "Terminal", &detail);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, Icon::Delete, "Clear log").clicked() {

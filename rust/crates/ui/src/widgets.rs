@@ -138,12 +138,13 @@ fn paint_pill(ui: &Ui, rect: Rect, active: bool, hovered: bool) {
     }
 }
 
-/// A card's header: its title as the one open pill tab, in sentence case ("CONTROL PANEL" reads "Control panel").
-/// Painted, not a widget: the area it heads already says what it is.
+/// A card's header: its title as the one open pill tab, in sentence case ("CONTROL PANEL" reads "Control panel"),
+/// a label for screen readers.
 pub fn section(ui: &mut Ui, title: &str) {
     let title = sentence_case(title);
-    let galley = ui.painter().layout_no_wrap(title, style::medium(12.5), pal().text);
-    let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x + 20.0, 24.0), Sense::hover());
+    let galley = ui.painter().layout_no_wrap(title.clone(), style::medium(12.5), pal().text);
+    let (rect, r) = ui.allocate_exact_size(vec2(galley.size().x + 20.0, 24.0), Sense::hover());
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &title));
     paint_pill(ui, rect, true, false);
     ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, pal().text);
 }
@@ -209,13 +210,14 @@ pub fn chrome(margin: Margin) -> Frame {
     Frame::new().fill(pal().chrome).inner_margin(margin)
 }
 
-/// The tab over the terminal, as PhotoCraft's document tab: a title and a dimmed detail on the card colour. Painted,
-/// not a widget, so its text never doubles a device's name for screen readers.
+/// The tab over the terminal, as PhotoCraft's document tab: a title and a dimmed detail on the card colour. Screen
+/// readers get the title alone, so the detail never doubles a name shown elsewhere.
 pub fn doc_tab(ui: &mut Ui, title: &str, detail: &str) {
     let t = ui.painter().layout_no_wrap(title.to_string(), style::medium(12.5), pal().text);
     let d = ui.painter().layout_no_wrap(detail.to_string(), egui::FontId::proportional(11.0), pal().muted);
     let gap = if detail.is_empty() { 0.0 } else { 8.0 };
-    let (rect, _) = ui.allocate_exact_size(vec2(t.size().x + gap + d.size().x + 22.0, 26.0), Sense::hover());
+    let (rect, r) = ui.allocate_exact_size(vec2(t.size().x + gap + d.size().x + 22.0, 26.0), Sense::hover());
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, title));
     let p = ui.painter();
     p.rect(rect, CornerRadius::same(RADIUS_SM), pal().card, Stroke::new(1.0, pal().card_border), StrokeKind::Inside);
     let x = rect.left() + 11.0;
