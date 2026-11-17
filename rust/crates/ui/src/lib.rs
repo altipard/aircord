@@ -197,6 +197,8 @@ pub struct App {
     pub(crate) epoch: u64,
     /// Stops the reading of settings when the link goes.
     pub(crate) read_stop: Arc<AtomicBool>,
+    /// Counts the links: a connect's thread that wakes after its link was replaced sends nothing to the new one.
+    link_gen: Arc<std::sync::atomic::AtomicU64>,
     /// A restart was sent: the link going down is expected.
     pub(crate) restarting: bool,
 
@@ -257,6 +259,7 @@ impl App {
             transfer: None,
             epoch: 0,
             read_stop: Arc::new(AtomicBool::new(false)),
+            link_gen: Arc::default(),
             restarting: false,
             display: Vec::new(),
             total: 0,
@@ -597,6 +600,8 @@ impl App {
         self.restarting = false;
         let (link, out, pin, settle) = (Arc::clone(&self.link), self.outbox(), self.pin.trim().to_string(), self.timing.settle);
         let (epoch, stop, read_wait) = (self.epoch, Arc::clone(&self.read_stop), self.timing.read_wait);
+        let generation = Arc::clone(&self.link_gen);
+        let mine = generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         std::thread::spawn(move || {
             out.log(format!("-- connecting to {} ({}) --", sel.name, sel.addr));
             let Some(profile) = link.connect(&sel.addr) else {
@@ -610,6 +615,10 @@ impl App {
             out.post(Msg::Status(format!("connected: {} — settling, {next} in {}s", sel.name, settle.as_secs())));
             out.log(format!("-- waiting {}s for the device to settle, then {next} --", settle.as_secs()));
             std::thread::sleep(settle);
+            // Disconnected, and perhaps connected to another device meanwhile: this PIN is not for that one.
+            if generation.load(std::sync::atomic::Ordering::Relaxed) != mine {
+                return;
+            }
             if !link.is_connected() {
                 out.log("-- link dropped during init --");
                 return;
@@ -643,6 +652,7 @@ impl App {
 
     fn set_disconnected(&mut self, status: &str) {
         self.conn = Conn::Idle;
+        self.link_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.read_stop.store(true, std::sync::atomic::Ordering::Relaxed);
         self.guided_reset(guided::Read::Idle);
         if matches!(self.transfer, Some(xfer::Transfer { stage: xfer::Stage::Review, .. })) {

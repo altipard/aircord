@@ -744,6 +744,26 @@ fn a_playbook_started_in_the_window_ends_a_read_under_way() {
 }
 
 #[test]
+fn a_pin_is_not_sent_to_the_device_connected_next() {
+    let mut w = world(FakeLink::console("aa", "Sensor 7"));
+    w.h.state_mut().timing.settle = Duration::from_millis(300);
+    w.h.state_mut().pin = "349011".into();
+    press(&mut w.h, "Scan");
+    press(&mut w.h, "Stop");
+    press(&mut w.h, "Sensor 7");
+    press(&mut w.h, "Connect");
+    wait(&mut w.h, "the connection", |a| matches!(a.conn, Conn::Connected { .. }));
+    // Let go and connect again without a PIN, while the first connect still waits to send its own.
+    press(&mut w.h, "Disconnect");
+    w.h.state_mut().pin.clear();
+    press(&mut w.h, "Connect");
+    settled(&mut w);
+    std::thread::sleep(Duration::from_millis(400));
+    run(&mut w.h);
+    assert_eq!(w.link.sent(), ["AT+CFG"], "the first connect's PIN never went out");
+}
+
+#[test]
 fn a_playbook_takes_the_link_from_a_read_under_way() {
     let link = FakeLink::console("aa", "Sensor 7");
     // A device that takes its time with the dump.
