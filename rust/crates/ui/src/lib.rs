@@ -19,7 +19,7 @@ use aircord_core::link::{Device, Link};
 use aircord_core::playbook::{self, Playbooks};
 use aircord_core::scan::{Column, Sort};
 use aircord_core::session::Sessions;
-use aircord_core::{config, filter, ota};
+use aircord_core::{config, filter, ota, redact};
 use egui::{
     Align, Align2, CentralPanel, Color32, Context, FontId, Frame, Id, Key, Layout, Margin, Modifiers, Panel, Rect, RichText, ScrollArea,
     Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, WidgetType, vec2,
@@ -191,6 +191,8 @@ pub struct App {
 
     // the control panel
     pub template: Option<String>,
+    /// The active template's secret keys beyond the always-secret ones: what [`App::log_line`] masks on top.
+    secrets: Vec<String>,
     inputs: BTreeMap<usize, String>,
     pub(crate) values: BTreeMap<usize, String>,
     pub(crate) capture: Option<Capture>,
@@ -235,6 +237,7 @@ impl App {
             status: "idle".into(),
             alert: Alert::default(),
             template: None,
+            secrets: Vec::new(),
             inputs: BTreeMap::new(),
             values: BTreeMap::new(),
             capture: None,
@@ -262,12 +265,45 @@ impl App {
 
     // ---------- the terminal's record ----------
 
-    /// A timestamped line in the terminal.
+    /// A timestamped line in the terminal, its passwords masked: the fixed ones and the active template's secrets. The
+    /// terminal is what Copy and Save hand out, so nothing gets into it in clear.
     pub fn log_line(&mut self, text: impl Into<String>) {
         let time = chrono::Local::now().format("%H:%M:%S").to_string();
-        self.log.push_back(LogLine { time, text: text.into() });
+        let text = self.masked(&text.into());
+        self.log.push_back(LogLine { time, text });
         while self.log.len() > MAX_LOG_LINES {
             self.log.pop_front();
+        }
+    }
+
+    /// `line` with every `AT+<secret>=` value in it masked.
+    fn masked(&self, line: &str) -> String {
+        let extra: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
+        redact::redact_line(line, &extra).into_owned()
+    }
+
+    /// Makes `name` the template shown. Its secrets are masked from here on, and in what the terminal already holds:
+    /// the lines that named the model came before the template was known.
+    pub(crate) fn set_template(&mut self, name: Option<String>) {
+        let secrets: Vec<String> = name
+            .as_ref()
+            .and_then(|n| self.stores.templates.get(n))
+            .map(|t| t.secret_keys().into_iter().filter(|k| !redact::is_always_secret(k)).map(str::to_string).collect())
+            .unwrap_or_default();
+        self.template = name;
+        self.values.clear();
+        self.inputs.clear();
+        if matches!(self.capture, Some(Capture { target: CaptureFor::Action(_), .. })) {
+            self.capture = None;
+        }
+        if secrets != self.secrets {
+            self.secrets = secrets;
+            if !self.secrets.is_empty() {
+                let lines: Vec<String> = self.log.iter().map(|l| self.masked(&l.text)).collect();
+                for (line, text) in self.log.iter_mut().zip(lines) {
+                    line.text = text;
+                }
+            }
         }
     }
 
@@ -538,14 +574,15 @@ impl App {
 
     fn set_disconnected(&mut self, status: &str) {
         self.conn = Conn::Idle;
-        self.template = None;
+        self.set_template(None);
         self.capture = None;
         self.picker = None;
         self.set_status(status);
     }
 
     /// Sends an AT command and keeps it in the device's history. The command line and the control panel both send
-    /// through here.
+    /// through here. A command that sets a password is sent but not kept: the history is a file on disk, and a masked
+    /// entry would send the mask as the new password when run again.
     pub fn send_cmd(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         if cmd.is_empty() {
@@ -553,6 +590,11 @@ impl App {
         }
         if !self.connected() || !self.link.is_connected() {
             self.alert.warn("not connected — connect to a device first");
+            return;
+        }
+        let extra: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
+        if redact::is_secret_command(cmd, &extra) {
+            self.link.send(cmd);
             return;
         }
         if let Some(addr) = self.link.current_addr()

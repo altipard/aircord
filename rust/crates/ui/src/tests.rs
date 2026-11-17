@@ -25,7 +25,26 @@ struct World {
 }
 
 fn world(link: FakeLink) -> World {
+    world_with(link, &[])
+}
+
+/// A device type of the test's own, so a test does not lean on what a preset happens to hold: picked by the name
+/// `X1…`, with a secret that is not one of the always-masked keys.
+const X1: &str = "name = \"Prüfgerät X1\"\nmatch = '^X1'\nmodel = '^X1-NB(,|$)'\n\
+    [[action]]\nlabel = \"Firmware\"\ncmd = \"AT+FW\"\ntype = \"read\"\nparse = '([0-9]+\\.[0-9]+\\.[0-9]+)'\n\
+    [[action]]\nlabel = \"Neu starten\"\ncmd = \"ATZ\"\ntype = \"button\"\nconfirm = true\n\
+    [[setting]]\nkey = \"TOKEN\"\nlabel = \"Zugangsschlüssel\"\ngroup = \"Server\"\ntype = \"secret\"\n\
+    [[setting]]\nkey = \"TDC\"\nlabel = \"Sendeintervall\"\ngroup = \"Senden\"\ntype = \"duration\"\nunit = \"s\"\npresets = [900, 3600]";
+
+const X1_CFG: &str = "AT+MODEL=X1-NB,v1.0.0\nAT+TOKEN=tok-abc\nAT+TDC=900\nOK";
+
+/// [`world`] with these files in the user's templates folder.
+fn world_with(link: FakeLink, templates: &[(&str, &str)]) -> World {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("templates")).unwrap();
+    for (file, text) in templates {
+        std::fs::write(dir.path().join("templates").join(file), text).unwrap();
+    }
     let link = Arc::new(link);
     let inbox = Inbox::default();
     link.set_events(Arc::new(inbox.outbox()));
@@ -126,6 +145,28 @@ fn a_command_typed_is_sent_and_kept_in_the_device_history() {
     wait(&mut w.h, "the reply", |a| logged(a, "<< OK"));
     let again = aircord_core::history::History::at(w.dir.path().join("history.json"));
     assert_eq!(again.get("aa"), ["AT+VER"]);
+}
+
+#[test]
+fn a_template_s_own_secret_is_masked_in_the_terminal_and_kept_out_of_the_history() {
+    let mut w = world_with(FakeLink::configured("aa", "X1-NB", X1_CFG), &[("x1.toml", X1)]);
+    connected(&mut w, "X1-NB");
+    assert_eq!(w.h.state().template.as_deref(), Some("Prüfgerät X1"));
+    w.h.state_mut().send_cmd("AT+CFG");
+    wait(&mut w.h, "the dump", |a| logged(a, "<< AT+TDC=900"));
+    assert!(logged(w.h.state(), "<< AT+TOKEN=******"), "{}", w.h.state().log_text());
+    w.h.state_mut().cmd = "AT+TOKEN=neu-123".into();
+    press(&mut w.h, "Send");
+    w.h.state_mut().cmd = "AT+PWORD=geheim".into();
+    press(&mut w.h, "Send");
+    wait(&mut w.h, "the echoes", |a| logged(a, ">> AT+PWORD=******") && logged(a, ">> AT+TOKEN=******"));
+    assert_eq!(w.link.cfg_value("TOKEN").as_deref(), Some("neu-123"), "the device got the value");
+    let text = w.h.state().log_text();
+    assert!(!text.contains("tok-abc") && !text.contains("neu-123") && !text.contains("geheim"), "{text}");
+    let again = aircord_core::history::History::at(w.dir.path().join("history.json"));
+    assert_eq!(again.get("aa"), ["AT+CFG"], "a command with a password is not written to disk");
+    w.h.state_mut().open_picker();
+    assert_eq!(w.h.state().picker_items(), ["AT+CFG"], "nor offered to run again");
 }
 
 #[test]

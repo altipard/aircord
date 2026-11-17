@@ -14,9 +14,8 @@ impl App {
     /// On connect: a loaded session's template wins, else the first that fits the name.
     pub(crate) fn apply_template_for(&mut self, device_name: &str) {
         let want = self.want_template.take().filter(|t| self.stores.templates.get(t).is_some());
-        self.template = want.or_else(|| self.stores.templates.suggest(device_name).map(|t| t.name.clone()));
-        self.values.clear();
-        self.inputs.clear();
+        let name = want.or_else(|| self.stores.templates.suggest(device_name).map(|t| t.name.clone()));
+        self.set_template(name);
     }
 
     /// Sends an action's command, asking first when the template marks it destructive: a panel is a column of similar
@@ -84,9 +83,7 @@ impl App {
                 });
         });
         if let Some(p) = pick {
-            self.template = p;
-            self.values.clear();
-            self.inputs.clear();
+            self.set_template(p);
         }
         ui.add_space(10.0);
 
