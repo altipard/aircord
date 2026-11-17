@@ -1,8 +1,10 @@
 # Gerät einstellen ohne Befehle
 
 Aircord öffnet mit dem Reiter **Einstellungen**. Dort wird ein Gerät über ein Formular eingestellt; AT-Befehle muss
-niemand kennen. Die bisherige Ansicht mit Terminal, Bedienfeld, Playbooks, Sessions und Firmware liegt unverändert im
-Reiter **Experte**.
+niemand kennen. Die bisherige Ansicht mit Terminal, Bedienfeld, Playbooks, Sessions und Firmware liegt im Reiter
+**Experte**. Sie arbeitet wie bisher, mit einem Unterschied: Beim Verbinden liest Aircord die Einstellungen des Geräts
+jetzt von selbst. Wer in dieser Zeit einen Befehl sendet oder ein Playbook startet, bricht das Lesen ab; es lässt sich
+im Reiter **Einstellungen** nachholen.
 
 ## In vier Schritten
 
@@ -15,13 +17,16 @@ Reiter **Experte**.
 4. **Übertragen** drücken. Ein Dialog zeigt jede Änderung als Vorher und Nachher. Erst nach der Bestätigung wird
    gesendet.
 
+Ist **Übertragen** gesperrt und steht unten „bitte zuerst die Einstellungen neu lesen“ steht, hat Aircord keinen aktuellen
+Stand des Geräts: mit dem Kreispfeil oben rechts neu lesen.
+
 ## Das Ergebnis
 
 Nach der Übertragung liest Aircord das Gerät noch einmal und meldet je Einstellung:
 
 - **übernommen** – der Wert steht so im Gerät.
-- **abgelehnt** – das Gerät hat den Wert nicht angenommen; der Grund steht dabei. Die Eingabe bleibt im Formular und
-  kann berichtigt werden.
+- **abgelehnt** – das Gerät hat den Wert nicht angenommen. Die Eingabe bleibt im Formular und kann berichtigt
+  werden. Die genaue Meldung des Geräts steht im Tooltip der Zeile und im Terminal des Reiters **Experte**.
 - **nicht bestätigt** – gesendet, aber das Gerät ließ sich danach nicht lesen. Mit dem Kreispfeil oben rechts neu
   lesen.
 
@@ -37,9 +42,12 @@ Antenne angeschraubt? Gerät näher ans Fenster?“.
 
 ## Passwort
 
-Ein Passwortfeld erscheint nur, wenn das Gerät seine Einstellungen nicht herausgibt. Das Passwort steht auf dem
-Etikett des Geräts. Es wird verdeckt eingegeben und erscheint weder im Terminal noch in gespeicherten Protokollen
-oder im Befehlsverlauf.
+Ein Passwortfeld erscheint nur, wenn das Gerät auf die Frage nach seinen Einstellungen nicht antwortet. Das Passwort
+steht auf dem Etikett des Geräts. Es wird verdeckt eingegeben und erscheint weder im Terminal noch in einem
+gespeicherten Protokoll oder im Befehlsverlauf.
+
+Eine gespeicherte Session enthält das Passwort dagegen wie bisher im Klartext, damit sie das Gerät wieder öffnen
+kann. Die Datei ist nur für das eigene Benutzerkonto lesbar (Rechte 0600) und gehört nicht in fremde Hände.
 
 Passwortfelder im Formular sind leer. Leer heißt: unverändert. Wo ein Passwort gelöscht werden darf, gibt es dafür
 den Knopf **Löschen**.
