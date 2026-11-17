@@ -133,6 +133,8 @@ visible_if   = "PRO=3,*"
 
 # --- Messen und Senden --------------------------------------------------------
 # Ein Minimum für TDC dokumentiert Dragino nicht (Inventar, offener Punkt 6).
+# Annahme: 60 s bis 86400 s (1 Tag). Kürzer leert die Batterie in Tagen, länger
+# lässt einen ausgefallenen Knoten zu lange unbemerkt.
 
 [[setting]]
 key     = "TDC"
@@ -141,6 +143,8 @@ group   = "Messen & Senden"
 help    = "Wie oft der Sensor Daten schickt. Kürzer heißt mehr Daten und kürzere Batterielaufzeit."
 type    = "duration"
 unit    = "s"
+min     = 60
+max     = 86400
 presets = [300, 900, 1800, 3600, 7200, 14400, 43200, 86400]
 
 [[setting]]
@@ -189,6 +193,8 @@ pattern = '-?[0-9]{1,3},-?[0-9]{1,3}'
 
 # --- Nur im Expertenmodus ------------------------------------------------------
 
+# Default laut Inventar 5 min. Annahme: 1 bis 60 min, die Grenzen dokumentiert
+# Dragino nicht.
 [[setting]]
 key     = "CSQTIME"
 label   = "Dauer der Netzsuche"
@@ -196,6 +202,8 @@ group   = "Netz"
 help    = "Länger suchen hilft bei schwachem Netz und kostet Batterie."
 type    = "duration"
 unit    = "min"
+min     = 1
+max     = 60
 presets = [5, 10, 15]
 expert  = true
 
@@ -273,12 +281,15 @@ on     = "1"
 off    = "0"
 expert = true
 
+# Inventar-Beispiel 1000 ms. Annahme: höchstens 10 s, jede Millisekunde hält das
+# Funkmodul wach; die Grenze dokumentiert Dragino nicht.
 [[setting]]
 key    = "RXDL"
 label  = "Empfangsfenster nach dem Senden verlängern"
 group  = "Diagnose"
 type   = "duration"
 unit   = "ms"
+max    = 10000
 expert = true
 
 [[setting]]

@@ -463,6 +463,13 @@ type  = "select"
         }
         let alarms = |name: &str| t.get(name).unwrap().settings.iter().filter(|s| s.key.starts_with("TEMPALARM")).count();
         assert_eq!([alarms("Dragino D20-NB"), alarms("Dragino D22-NB"), alarms("Dragino D23-NB")], [1, 2, 3], "one alarm per probe");
+        for name in ["Dragino D20-NB", "Dragino D22-NB", "Dragino D23-NB", "Dragino WQS-NB", "Dragino S31-NB"] {
+            let tpl = t.get(name).unwrap();
+            let refused = |key: &str, v: &str| tpl.setting(key).is_some_and(|s| s.check(v).is_err());
+            assert!(refused("TDC", "59") && refused("TDC", "86401") && !refused("TDC", "60"), "{name}: TDC bounds");
+            assert!(refused("CSQTIME", "0") && refused("CSQTIME", "61"), "{name}: CSQTIME bounds");
+            assert!(refused("RXDL", "10001") && !refused("RXDL", "1000"), "{name}: RXDL bound");
+        }
         for name in ["Dragino D20-NB", "Dragino D22-NB", "Dragino D23-NB"] {
             let ps = t.get(name).unwrap().setting("POWER_SAVE").unwrap();
             assert_eq!(ps.risk, crate::settings::Risk::Network, "{name}: a wrong window looks like a dead node");
