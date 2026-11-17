@@ -384,13 +384,15 @@ impl App {
     /// An error on the alert line, and in the terminal, which is the durable record: an alert can be superseded, the
     /// log scrolled back through and saved.
     pub fn fail(&mut self, msg: impl Into<String>) {
-        let msg = msg.into();
+        let msg = self.masked(&msg.into());
         self.log_line(format!("!! {msg}"));
         self.alert.fail(msg);
     }
 
+    /// The status line names the command a playbook is at, so it is masked like the terminal: the window gets
+    /// screen-shared and photographed.
     fn set_status(&mut self, s: impl Into<String>) {
-        self.status = s.into();
+        self.status = self.masked(&s.into());
     }
 
     fn connected(&self) -> bool {
