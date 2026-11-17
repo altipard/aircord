@@ -729,6 +729,21 @@ fn a_panel_action_during_the_read_ends_it_too() {
 }
 
 #[test]
+fn a_playbook_started_in_the_window_ends_a_read_under_way() {
+    let mut w = world(slow());
+    reading(&mut w, "Sensor 7");
+    press(&mut w.h, "Playbooks");
+    press(&mut w.h, "Run");
+    press(&mut w.h, "Run anyway");
+    assert_eq!(w.h.state().guided.read, Read::Idle);
+    assert!(logged(w.h.state(), "reading the settings stopped"));
+    wait(&mut w.h, "the run", |a| a.running.is_none() && logged(a, "finished"));
+    let steps: Vec<String> = playbook::dragino_1nce().steps.into_iter().map(|s| s.cmd).collect();
+    assert_eq!(w.link.sent()[1..], steps, "after the read's AT+CFG, the steps and nothing else");
+    assert_eq!(w.h.state().guided.read, Read::Idle);
+}
+
+#[test]
 fn a_playbook_takes_the_link_from_a_read_under_way() {
     let link = FakeLink::console("aa", "Sensor 7");
     // A device that takes its time with the dump.
