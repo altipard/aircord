@@ -660,8 +660,9 @@ impl App {
             // The PIN first, if there is one, then the settings: the guided view's form, and the model for the template.
             let result = guided::read_settings(&*link, Some(pin.as_str()).filter(|p| !p.is_empty()), read_wait, &stop);
             // The read can outlast the link: a status for a device already let go of would overwrite "disconnected",
-            // or name the wrong device once another one is connected.
-            if generation.load(std::sync::atomic::Ordering::Relaxed) != mine {
+            // or name the wrong device once another one is connected. A link that just went ends the read at once,
+            // before the window has counted on, so the link is asked too.
+            if generation.load(std::sync::atomic::Ordering::Relaxed) != mine || !link.is_connected() {
                 return;
             }
             out.post(Msg::Status(format!("connected: {}", sel.name)));
@@ -673,7 +674,11 @@ impl App {
     }
 
     pub fn disconnect(&mut self) {
+        // Counted on before the link goes: the connect's thread wakes the moment it does.
+        let was = self.link_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if !self.link.disconnect() {
+            // Nothing was let go of: the thread, if there is one, is still this link's.
+            self.link_gen.store(was, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         self.log_line("-- disconnected --");
