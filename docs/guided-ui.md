@@ -36,8 +36,11 @@ verbinden. Bei **Später** bleibt alles, wie es ist. Aircord startet ein Gerät 
 
 ## Status
 
-Die Statuskarte zeigt, was das Gerät beim Start gemeldet hat: Passwort angenommen, SIM-Karte erkannt, Netz mit
-Funkband, Zugangspunkt gesetzt. Meldet das Gerät mehrere Minuten lang kein Netz, erscheint der Hinweis „Kein Netz –
+Die Statuskarte zeigt, was das Gerät von sich aus meldet. Beim Start: Passwort angenommen, SIM-Karte erkannt, Netz
+mit Güte, Pegel und Funkband, Zugangspunkt gesetzt. Sobald das Gerät Messwerte sendet, kommen dazu: Batterie in Volt
+mit Einstufung (gut, schwach, fast leer), Temperatur, Luftfeuchte, der externe Fühler oder „nicht angeschlossen“ und
+die letzte Sendung mit Uhrzeit und Ausgang (erfolgreich, fehlgeschlagen, abgebrochen). Die Werte stehen erst da, wenn
+das Gerät während der Verbindung gesendet hat. Die Einstufung der Batterie ist eine Faustregel nach der Spannung. Meldet das Gerät mehrere Minuten lang kein Netz, erscheint der Hinweis „Kein Netz –
 Antenne angeschraubt? Gerät näher ans Fenster?“.
 
 ## Passwort
