@@ -3,6 +3,8 @@
 # WQS-NB/NS. Nur Befehle aus dem Inventar (Q2/Q3). Am Gerät ungeprüft.
 # AT+QBAND fehlt (nicht in AT+CFG, vorbehaltlich Gerätetest), ebenso
 # AT+CLOCKLOG (Beschreibung in Q3 unsicher) und AT+CALZD2/4 (Widerspruch in Q3).
+# Unsicher für dieses Gerät, deshalb expert = true: AT+QCOPS und AT+NTP stehen
+# nur auf der allgemeinen NB-Seite (Q2), nicht im WQS-Handbuch (Q3).
 #
 # Ausgewählt über die AT+MODEL-Zeile von AT+CFG, nicht über den BLE-Namen
 # (der ist meist die IMEI). Einstellungen, die das Gerät in AT+CFG nicht meldet,

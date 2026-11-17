@@ -4,6 +4,8 @@
 # Nur Befehle aus dem Inventar (Q1/Q2). Am Gerät ungeprüft: Das AT+CFG-Format
 # der D2x ist nicht dokumentiert, die Laien-Einstellungen folgen Abschnitt 4
 # des Inventars. AT+QBAND fehlt (nicht in AT+CFG, vorbehaltlich Gerätetest).
+# Unsicher für dieses Gerät, deshalb expert = true: AT+QCOPS und AT+NTP stehen
+# nur auf der allgemeinen NB-Seite (Q2), nicht im D2x-Handbuch (Q1).
 #
 # Ausgewählt über die AT+MODEL-Zeile von AT+CFG, nicht über den BLE-Namen
 # (der ist meist die IMEI). Einstellungen, die das Gerät in AT+CFG nicht meldet,

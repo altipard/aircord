@@ -468,6 +468,9 @@ type  = "select"
                 assert!(INVENTORY.contains(&format!("`AT+{}=", s.key)), "{name}: AT+{} is not in the inventory", s.key);
             }
             assert!(tpl.setting("QBAND").is_none(), "{name}: QBAND waits for a device test");
+            for key in ["QCOPS", "NTP"] {
+                assert!(tpl.setting(key).is_none_or(|s| s.expert), "{name}: {key} is only on the general NB page, expert only");
+            }
         }
         let alarms = |name: &str| t.get(name).unwrap().settings.iter().filter(|s| s.key.starts_with("TEMPALARM")).count();
         assert_eq!([alarms("Dragino D20-NB"), alarms("Dragino D22-NB"), alarms("Dragino D23-NB")], [1, 2, 3], "one alarm per probe");
