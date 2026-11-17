@@ -3,7 +3,7 @@
 //! `AT+MODEL=<model>,v<version>`, `NULL` stands for an unset value, and blank lines turn up in the middle. Anything else
 //! (an echo, a banner, a `Signal Strength:99` the device prints every few seconds) is not a setting and is skipped.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::redact;
@@ -18,6 +18,8 @@ pub struct Cfg {
     /// Whether the closing `OK` came; a dump cut short by a drop or a timeout is not the whole state.
     pub complete: bool,
     values: BTreeMap<String, String>,
+    /// Keys masked in `{:?}` on top of the always-secret ones: a template's `type = "secret"` settings.
+    hidden: BTreeSet<String>,
 }
 
 /// `AT+<KEY>=<value>` as key and value, or nothing for any other line.
@@ -81,13 +83,23 @@ impl Cfg {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
+
+    /// Masks these keys in `{:?}` as well; [`crate::device::Template::protect`] passes a template's secrets.
+    pub fn hide<'a>(&mut self, keys: impl IntoIterator<Item = &'a str>) {
+        self.hidden.extend(keys.into_iter().map(str::to_string));
+    }
+
+    fn is_hidden(&self, key: &str) -> bool {
+        redact::is_always_secret(key) || self.hidden.contains(key)
+    }
 }
 
-/// Lists the values with every always-secret one masked, so a `{:?}` in a log can't leak the device password.
+/// Lists the values with every secret one masked (the always-secret keys and those given to [`Cfg::hide`]), so a
+/// `{:?}` in a log can't leak a password.
 impl fmt::Debug for Cfg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let shown: BTreeMap<&str, &str> =
-            self.values.iter().map(|(k, v)| (k.as_str(), if redact::is_always_secret(k) { redact::MASK } else { v.as_str() })).collect();
+            self.values.iter().map(|(k, v)| (k.as_str(), if self.is_hidden(k) { redact::MASK } else { v.as_str() })).collect();
         f.debug_struct("Cfg")
             .field("model", &self.model)
             .field("firmware", &self.firmware)
@@ -127,9 +139,14 @@ mod tests {
 
     #[test]
     fn debug_masks_passwords() {
-        let shown = format!("{:?}", Cfg::parse_text(S31));
+        let mut cfg = Cfg::parse_text(&S31.replace("AT+UNAME=NULL", "AT+UNAME=token-123"));
+        let shown = format!("{cfg:?}");
         assert!(!shown.contains("kxqmzp"), "{shown}");
         assert!(shown.contains("\"PWORD\": \"******\"") && shown.contains("\"TDC\": \"900\""), "{shown}");
+        cfg.hide(["UNAME"]);
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("token-123") && shown.contains("\"UNAME\": \"******\""), "{shown}");
+        assert_eq!(cfg.get("UNAME"), Some("token-123"), "hiding is for display only");
     }
 
     #[test]

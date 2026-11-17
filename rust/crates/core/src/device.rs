@@ -152,6 +152,11 @@ impl Template {
         self.settings.iter().filter(|s| s.is_secret()).map(|s| s.key.as_str()).collect()
     }
 
+    /// Marks this template's secrets in `cfg`, so its `{:?}` masks them too.
+    pub fn protect(&self, cfg: &mut crate::cfg::Cfg) {
+        cfg.hide(self.secret_keys());
+    }
+
     /// `line` with every password in it masked: the fixed ones and this template's secrets.
     pub fn redact<'a>(&self, line: &'a str) -> std::borrow::Cow<'a, str> {
         redact::redact_line(line, &self.secret_keys())

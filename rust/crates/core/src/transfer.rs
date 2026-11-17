@@ -287,12 +287,20 @@ fn settle(tap: &Tap, d: Duration, stop: &AtomicBool) {
     }
 }
 
-/// Sends each change and checks its reply, then reads `AT+CFG` again and reports every change. A refused change does
-/// not stop the others, they are independent settings; a lost link or `stop` does, and the rest are reported as not
-/// sent. A change that got no answer is judged by the read-back like the others, since the device may well have taken
-/// it; after such a silence the transfer waits a moment and discards a late reply. Secrets go out through
-/// [`Link::send_secret`], so their echo is masked, and no result carries their value. `ATZ` is never sent.
-pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicBool, report: &mut dyn FnMut(Progress)) -> Outcome {
+/// Sends each change (planned with `tpl` by [`plan`]) and checks its reply, then reads `AT+CFG` again and reports every
+/// change. A refused change does not stop the others, they are independent settings; a lost link or `stop` does, and
+/// the rest are reported as not sent. A change that got no answer is judged by the read-back like the others, since the
+/// device may well have taken it; after such a silence the transfer waits a moment and discards a late reply. Secrets
+/// go out through [`Link::send_secret`], so their echo is masked, no result carries their value, and the read-back
+/// masks `tpl`'s secrets in `{:?}`. `ATZ` is never sent.
+pub fn apply(
+    link: &dyn Link,
+    tpl: &Template,
+    changes: &[Change],
+    wait: Duration,
+    stop: &AtomicBool,
+    report: &mut dyn FnMut(Progress),
+) -> Outcome {
     let tap = link.lines();
     let total = changes.len();
     let mut sent: Vec<Sent> = Vec::with_capacity(total);
@@ -360,7 +368,11 @@ pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicB
         .collect();
     let reboot_needed =
         changes.iter().zip(&fields).any(|(c, f)| c.needs_reboot && matches!(f.status, Status::Verified | Status::Unverified { .. }));
-    Outcome { fields, reboot_needed, readback: readback.and_then(Result::ok) }
+    let readback = readback.and_then(Result::ok).map(|mut cfg| {
+        tpl.protect(&mut cfg);
+        cfg
+    });
+    Outcome { fields, reboot_needed, readback }
 }
 
 #[cfg(test)]
@@ -403,7 +415,7 @@ mod tests {
 
     fn run(link: &FakeLink, changes: &[Change]) -> (Outcome, Vec<Progress>) {
         let mut progress = Vec::new();
-        let out = apply(link, changes, WAIT, &AtomicBool::new(false), &mut |p| progress.push(p));
+        let out = apply(link, &s31_template(), changes, WAIT, &AtomicBool::new(false), &mut |p| progress.push(p));
         (out, progress)
     }
 
@@ -555,7 +567,7 @@ mod tests {
         link.reply_late("AT+TDC=1800", Duration::from_millis(450), &["OK"]);
         link.reply_late("AT+SHTEMP=20,30", Duration::from_millis(200), &["AT_PARAM_ERROR"]);
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
-        let out = apply(&link, &changes, wait, &AtomicBool::new(false), &mut |_| {});
+        let out = apply(&link, &s31_template(), &changes, wait, &AtomicBool::new(false), &mut |_| {});
         assert_eq!(out.fields[1].status, Status::Failed { why: "Das Gerät hat den Wert abgelehnt (AT_PARAM_ERROR).".into() });
         assert_eq!(out.fields[0].status, Status::Differs { actual: "900".into() }, "late replies do not change the fake");
     }
@@ -581,7 +593,7 @@ mod tests {
 
         let cut = device();
         cut.reply("AT+CFG", &["AT+MODEL=S31-NB,v1.4.0", "AT+PRO=3,5"]);
-        let out = apply(&cut, &changes, Duration::from_millis(40), &AtomicBool::new(false), &mut |_| {});
+        let out = apply(&cut, &s31_template(), &changes, Duration::from_millis(40), &AtomicBool::new(false), &mut |_| {});
         assert_eq!(out.fields[0].status, Status::Unverified { why: "Keine vollständige Antwort auf AT+CFG.".into() });
         assert!(out.readback.is_none());
     }
@@ -590,11 +602,11 @@ mod tests {
     fn stop_and_a_missing_link_send_nothing() {
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800")])).unwrap();
         let link = device();
-        let out = apply(&link, &changes, WAIT, &AtomicBool::new(true), &mut |_| {});
+        let out = apply(&link, &s31_template(), &changes, WAIT, &AtomicBool::new(true), &mut |_| {});
         assert_eq!(out.fields[0].status, Status::Failed { why: "Abgebrochen, nicht gesendet.".into() });
         assert!(link.sent().is_empty());
         let offline = FakeLink::configured("A", "x", S31);
-        let out = apply(&offline, &changes, WAIT, &AtomicBool::new(false), &mut |_| {});
+        let out = apply(&offline, &s31_template(), &changes, WAIT, &AtomicBool::new(false), &mut |_| {});
         assert_eq!(out.fields[0].status, Status::Failed { why: "Keine Verbindung, nicht gesendet.".into() });
     }
 
@@ -625,6 +637,24 @@ mod tests {
         let results = format!("{:?}", out);
         assert!(!results.contains("mqtt-geheim") && !results.contains("neupwx") && !results.contains("kxqmzp"), "{results}");
         assert!(changes.iter().filter(|c| c.secret).all(|c| c.from == "******"), "the old password is not kept");
+    }
+
+    #[test]
+    fn the_read_back_hides_the_template_s_own_secrets() {
+        let tpl = parse(
+            "name = \"x\"\n[[setting]]\nkey = \"TOKEN\"\nlabel = \"t\"\ngroup = \"g\"\ntype = \"secret\"\n\
+             [[setting]]\nkey = \"TDC\"\nlabel = \"d\"\ngroup = \"g\"\ntype = \"duration\"\nunit = \"s\"",
+        )
+        .unwrap();
+        let dump = "AT+MODEL=X1-NB,v1.0\nAT+TOKEN=tok-abc\nAT+TDC=900\nOK";
+        let link = FakeLink::configured("A", "x", dump);
+        link.connect("A");
+        let changes = plan(&tpl, &Cfg::parse_text(dump), &want(&[("TDC", "1200")])).unwrap();
+        let out = apply(&link, &tpl, &changes, WAIT, &AtomicBool::new(false), &mut |_| {});
+        assert!(out.all_verified());
+        let shown = format!("{out:?}");
+        assert!(!shown.contains("tok-abc") && shown.contains("\"TOKEN\": \"******\""), "{shown}");
+        assert_eq!(out.readback.unwrap().get("TOKEN"), Some("tok-abc"));
     }
 
     #[test]
