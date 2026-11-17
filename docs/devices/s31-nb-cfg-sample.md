@@ -1,7 +1,7 @@
 # S31-NB: Startbanner und `AT+CFG` (Gerätetest)
 
 Mitschrift eines echten Geräts, Grundlage für die Einstellungen in Aircord
-(`rust/crates/core`: `cfg`, `banner`, `transfer`, Preset
+(`crates/core`: `cfg`, `banner`, `transfer`, Preset
 `presets/dragino-s31-nb.toml`).
 
 - Gerät: Dragino S31-NB, Firmware v1.4.0, Modul BC660K-GL
@@ -10,7 +10,7 @@ Mitschrift eines echten Geräts, Grundlage für die Einstellungen in Aircord
 - Verbindung über BLE, danach Eingabe des Passworts vom Etikett
 
 IMEI, IMSI und Passwort sind durch Beispielwerte bzw. `******` ersetzt. Die
-Testdaten unter `rust/crates/core/testdata/` enthalten dieselbe Ausgabe mit
+Testdaten unter `crates/core/testdata/` enthalten dieselbe Ausgabe mit
 einem erfundenen Klartext-Passwort, damit der Test der Maskierung etwas prüft.
 
 ## Startbanner
@@ -119,7 +119,7 @@ Currently set frequency band: 8,20
 [64477]*****End of upload*****
 ```
 
-Dieselbe Ausgabe steht in `rust/crates/core/testdata/s31-nb-v1.4.0-upload.txt`.
+Dieselbe Ausgabe steht in `crates/core/testdata/s31-nb-v1.4.0-upload.txt`.
 Die Zeile `PSM mode configured` endet dort wie im Original mit einem
 Leerzeichen.
 
