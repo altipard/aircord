@@ -13,8 +13,11 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
 use crate::dialog::Then;
+use crate::form::Edit;
+use crate::guided::{NO_NETWORK_HINT, Read};
 use crate::inbox::Inbox;
-use crate::{App, Conn, Modal, Stores, Timing};
+use crate::xfer::Stage;
+use crate::{App, Conn, Modal, Stores, Timing, View};
 
 const IMEI: &str = "860601234567890";
 
@@ -22,10 +25,64 @@ struct World {
     h: Harness<'static, App>,
     link: Arc<FakeLink>,
     dir: tempfile::TempDir,
+    /// How many commands the connect itself sent: the PIN, and `AT+CFG` for the settings.
+    base: usize,
 }
 
+impl World {
+    /// What was sent since the connect.
+    fn sent(&self) -> Vec<String> {
+        self.link.sent().split_off(self.base)
+    }
+}
+
+/// The expert view over `link`, as the window was before the guided view came.
 fn world(link: FakeLink) -> World {
     world_with(link, &[])
+}
+
+/// The guided view over `link`: what the app opens with.
+fn lay(link: FakeLink, templates: &[(&str, &str)]) -> World {
+    let mut w = world_with(link, templates);
+    w.h.state_mut().view = View::Guided;
+    run(&mut w.h);
+    w
+}
+
+/// A real S31-NB's `AT+CFG` dump and start lines.
+const S31_CFG: &str = include_str!("../../core/testdata/s31-nb-v1.4.0-cfg.txt");
+const S31_BOOT: &str = include_str!("../../core/testdata/s31-nb-v1.4.0-boot.txt");
+/// The password in that dump.
+const S31_PASSWORD: &str = "kxqmzp";
+/// An NB node advertises its IMEI, not its model.
+const S31_NAME: &str = "866207050000001";
+
+fn s31() -> FakeLink {
+    FakeLink::configured("aa", S31_NAME, S31_CFG)
+}
+
+/// Searches, picks `name` and connects in the guided view, and waits for the settings.
+fn lay_connected(w: &mut World, name: &str) {
+    press(&mut w.h, "Suchen");
+    press(&mut w.h, "Stopp");
+    press(&mut w.h, name);
+    press(&mut w.h, "Verbinden");
+    settled(w);
+}
+
+/// Waits for the connection and for the settings read that follows it.
+fn settled(w: &mut World) {
+    wait(&mut w.h, "the connection", |a| matches!(a.conn, Conn::Connected { .. }));
+    wait(&mut w.h, "the settings", |a| matches!(a.guided.read, Read::Ready | Read::Failed(_)));
+    w.base = w.link.sent().len();
+}
+
+fn has(w: &World, label: &str) -> bool {
+    w.h.query_all_by_label(label).next().is_some()
+}
+
+fn has_part(w: &World, part: &str) -> bool {
+    w.h.query_all_by_label_contains(part).next().is_some()
 }
 
 /// A device type of the test's own, so a test does not lean on what a preset happens to hold: picked by the name
@@ -52,6 +109,8 @@ fn world_with(link: FakeLink, templates: &[(&str, &str)]) -> World {
     app.timing = Timing {
         settle: Duration::from_millis(10),
         reply_wait: Duration::from_millis(300),
+        read_wait: Duration::from_millis(300),
+        no_network_hint: Duration::from_secs(60),
         ota: aircord_core::ota::Timing {
             bootloader_window: Duration::from_secs(2),
             reset_drop: Duration::from_millis(200),
@@ -63,8 +122,9 @@ fn world_with(link: FakeLink, templates: &[(&str, &str)]) -> World {
         .with_max_steps(16)
         .with_step_dt(0.1)
         .build_ui_state(|ui, app: &mut App| app.show(ui), app);
+    h.state_mut().view = View::Expert;
     let _ = h.try_run();
-    World { h, link, dir }
+    World { h, link, dir, base: 0 }
 }
 
 fn run(h: &mut Harness<App>) {
@@ -98,7 +158,7 @@ fn connected(w: &mut World, name: &str) {
     press(&mut w.h, "Stop");
     press(&mut w.h, name);
     press(&mut w.h, "Connect");
-    wait(&mut w.h, "the connection", |a| matches!(a.conn, Conn::Connected { .. }));
+    settled(w);
 }
 
 #[test]
@@ -124,14 +184,14 @@ fn a_scan_lists_the_devices_strongest_first_and_a_header_sorts() {
 
 #[test]
 fn connect_sends_the_pin_masked_and_suggests_the_template() {
-    let mut w = world(FakeLink::console("aa", "D20-NB"));
+    let mut w = world_with(FakeLink::console("aa", "X1-NB"), &[("x1.toml", X1)]);
     w.h.state_mut().pin = "349011".into();
-    connected(&mut w, "D20-NB");
+    connected(&mut w, "X1-NB");
     wait(&mut w.h, "the PIN", |a| logged(a, ">> ******"));
     assert!(w.link.sent().contains(&"******".to_string()), "the fake records the echo");
     assert!(!w.h.state().log_text().contains("349011"), "the PIN never reaches the log");
-    assert_eq!(w.h.state().template.as_deref(), Some("Dragino NB-IoT"));
-    assert!(w.h.query_by_label("Send: Reboot device").is_some(), "the panel shows the template's actions");
+    assert_eq!(w.h.state().template.as_deref(), Some("Prüfgerät X1"));
+    assert!(w.h.query_by_label("Send: Neu starten").is_some(), "the panel shows the template's actions");
 }
 
 #[test]
@@ -140,7 +200,7 @@ fn a_command_typed_is_sent_and_kept_in_the_device_history() {
     connected(&mut w, "D20-NB");
     w.h.state_mut().cmd = "AT+VER".into();
     press(&mut w.h, "Send");
-    assert_eq!(w.link.sent(), ["AT+VER"]);
+    assert_eq!(w.sent(), ["AT+VER"]);
     assert!(w.h.state().cmd.is_empty());
     wait(&mut w.h, "the reply", |a| logged(a, "<< OK"));
     let again = aircord_core::history::History::at(w.dir.path().join("history.json"));
@@ -184,32 +244,32 @@ fn up_opens_the_history_and_enter_runs_the_newest() {
     w.h.key_press(Key::Enter);
     run(&mut w.h);
     assert!(w.h.state().picker.is_none());
-    assert_eq!(w.link.sent(), ["AT+CFG", "AT+VER", "AT+VER"]);
+    assert_eq!(w.sent(), ["AT+CFG", "AT+VER", "AT+VER"]);
 }
 
 #[test]
 fn a_destructive_panel_action_asks_before_it_sends() {
-    let mut w = world(FakeLink::console("aa", "D20-NB"));
-    connected(&mut w, "D20-NB");
-    press(&mut w.h, "Send: Reboot device");
-    assert!(w.link.sent().is_empty(), "nothing goes out before the yes");
-    assert!(w.h.query_by_label("Reboot device?").is_some());
+    let mut w = world_with(FakeLink::console("aa", "X1-NB"), &[("x1.toml", X1)]);
+    connected(&mut w, "X1-NB");
+    press(&mut w.h, "Send: Neu starten");
+    assert!(w.sent().is_empty(), "nothing goes out before the yes");
+    assert!(w.h.query_by_label("Neu starten?").is_some());
     press(&mut w.h, "Cancel");
-    assert!(w.link.sent().is_empty());
-    press(&mut w.h, "Send: Reboot device");
+    assert!(w.sent().is_empty());
+    press(&mut w.h, "Send: Neu starten");
     // The confirmation's Send, not the command line's below it.
     w.h.get_all_by_label("Send").min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
     run(&mut w.h);
-    assert_eq!(w.link.sent(), ["ATZ"]);
+    assert_eq!(w.sent(), ["ATZ"]);
 }
 
 #[test]
 fn a_read_action_shows_the_value_from_the_reply() {
-    let link = FakeLink::console("aa", "D20-NB");
-    link.reply("AT+VER", &["Dragino D20-NB firmware v1.4.2", "OK"]);
-    let mut w = world(link);
-    connected(&mut w, "D20-NB");
-    press(&mut w.h, "Read: Firmware version");
+    let link = FakeLink::console("aa", "X1-NB");
+    link.reply("AT+FW", &["X1-NB firmware v1.4.2", "OK"]);
+    let mut w = world_with(link, &[("x1.toml", X1)]);
+    connected(&mut w, "X1-NB");
+    press(&mut w.h, "Read: Firmware");
     wait(&mut w.h, "the value", |a| a.values.values().any(|v| v == "1.4.2"));
 }
 
@@ -230,11 +290,11 @@ fn a_playbook_that_reboots_asks_first_then_runs_every_step() {
     press(&mut w.h, "Playbooks");
     press(&mut w.h, "Run");
     assert!(w.h.query_by_label("Run \"dragino-nb-1nce\"?").is_some(), "the default ends in ATZ");
-    assert!(w.link.sent().is_empty());
+    assert!(w.sent().is_empty());
     press(&mut w.h, "Run anyway");
     wait(&mut w.h, "the run", |a| a.running.is_none() && logged(a, "finished"));
     let steps: Vec<String> = playbook::dragino_1nce().steps.into_iter().map(|s| s.cmd).collect();
-    assert_eq!(w.link.sent(), steps);
+    assert_eq!(w.sent(), steps);
     assert!(w.h.state().modal.is_none(), "the dialog got out of the terminal's way");
 }
 
@@ -251,7 +311,7 @@ fn a_playbook_step_without_its_reply_aborts_the_run() {
         "{}",
         w.h.state().alert.text
     );
-    assert_eq!(w.link.sent().len(), 2);
+    assert_eq!(w.sent().len(), 2);
 }
 
 fn playbook_alert(app: &App) -> String {
@@ -362,7 +422,7 @@ fn a_firmware_update_resets_the_node_and_flashes_its_bootloader() {
     assert_eq!(run_, Some(Some(Ok(()))), "log:\n{}", w.h.state().log_text());
     let flashed = w.link.bootloader_image();
     assert_eq!(&flashed[..image.len()], &image[..]);
-    assert!(w.link.sent().iter().any(|s| s == "ATZ"));
+    assert!(w.sent().iter().any(|s| s == "ATZ"));
     assert_eq!(w.h.state().conn, Conn::Idle);
     press(&mut w.h, "Close");
     assert!(w.h.state().ota.is_none());
@@ -413,47 +473,268 @@ fn the_rail_names_its_dialogs() {
 }
 
 /// Renders the window in both themes to PNGs under `$AIRCORD_SHOTS` (default: the system temp dir).
+// ---------- the guided view ----------
+
+#[test]
+fn the_guided_view_reads_the_settings_and_shows_them_as_a_form() {
+    let mut w = lay(s31(), &[]);
+    assert!(has(&w, "Noch keine Geräte"));
+    lay_connected(&mut w, S31_NAME);
+    assert_eq!(w.link.sent(), ["AT+CFG"], "the settings are read without being asked");
+    assert_eq!(w.h.state().template.as_deref(), Some("Dragino S31-NB"), "by the model: the name is an IMEI");
+    assert!(has(&w, "S31-NB") && has(&w, "v1.4.0"), "the head line names model and firmware");
+    assert!(has(&w, "Sendeintervall"));
+    assert!(has(&w, "Sendeintervall: 15 Minuten"), "900 seconds, in words");
+    assert!(has(&w, "Keine Änderungen"));
+    assert!(!has(&w, "Gerätepasswort ändern"), "expert settings stay folded away");
+    press(&mut w.h, "Weitere Einstellungen");
+    assert!(has(&w, "Gerätepasswort ändern"));
+    assert!(!w.h.state().log_text().contains(S31_PASSWORD), "{}", w.h.state().log_text());
+}
+
+#[test]
+fn a_change_is_counted_shown_before_and_after_and_transferred() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    press(&mut w.h, "Sendeintervall: 15 Minuten");
+    press(&mut w.h, "1 Stunde");
+    assert!(has(&w, "1 Änderung") && has(&w, "geändert: Sendeintervall"));
+    // A setting that only works after a restart, typed.
+    w.h.get_by_label("Server-Adresse und Port: Eingabe").click();
+    run(&mut w.h);
+    w.h.get_by_label("Server-Adresse und Port: Eingabe").type_text("x");
+    run(&mut w.h);
+    assert!(has(&w, "2 Änderungen"));
+    press(&mut w.h, "Zurücksetzen: Server-Adresse und Port");
+    assert!(has(&w, "1 Änderung"));
+    w.h.state_mut().guided.form.as_mut().unwrap().apply(Edit::Set("SERVADDR".into(), "10.0.0.9,1883".into()));
+    press(&mut w.h, "Übertragen");
+    assert!(w.sent().is_empty(), "nothing goes out before the yes");
+    assert!(has(&w, "Vorher") && has(&w, "Nachher") && has(&w, "15 Minuten") && has(&w, "1 Stunde"));
+    assert!(has_part(&w, "Das Gerät kann danach das Netz verlieren"), "the server address can cost the uplink");
+    press(&mut w.h, "Jetzt übertragen");
+    wait(&mut w.h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
+    assert_eq!(w.sent(), ["AT+SERVADDR=10.0.0.9,1883", "AT+TDC=3600", "AT+CFG"]);
+    assert!(has(&w, "Sendeintervall: übernommen") && has(&w, "Server-Adresse und Port: übernommen"));
+    assert!(has(&w, "Neu starten, damit alle Änderungen wirken?"));
+    assert!(!w.sent().contains(&"ATZ".to_string()), "a restart is offered, never sent by itself");
+    press(&mut w.h, "Ja, neu starten");
+    wait(&mut w.h, "the restart", |a| a.conn == Conn::Idle);
+    assert_eq!(w.sent().last().map(String::as_str), Some("ATZ"));
+    assert!(w.h.state().guided.notice.text.contains("startet neu"), "{}", w.h.state().guided.notice.text);
+    assert!(!w.h.state().log_text().contains(S31_PASSWORD));
+}
+
+#[test]
+fn later_leaves_the_device_running_with_the_form_up_to_date() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    w.h.state_mut().guided.form.as_mut().unwrap().apply(Edit::Set("SERVADDR".into(), "10.0.0.9,1883".into()));
+    press(&mut w.h, "Übertragen");
+    press(&mut w.h, "Jetzt übertragen");
+    wait(&mut w.h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
+    press(&mut w.h, "Später");
+    assert!(w.h.state().transfer.is_none() && w.h.state().connected());
+    assert!(!w.sent().contains(&"ATZ".to_string()));
+    assert!(has(&w, "Keine Änderungen"), "what arrived is the device's value now");
+    assert_eq!(w.h.state().guided.form.as_ref().unwrap().cfg.get("SERVADDR"), Some("10.0.0.9,1883"));
+}
+
+#[test]
+fn a_refused_value_is_marked_and_stays_a_change() {
+    let link = s31();
+    link.reject("TDC", "AT_PARAM_ERROR");
+    let mut w = lay(link, &[]);
+    lay_connected(&mut w, S31_NAME);
+    press(&mut w.h, "Sendeintervall: 15 Minuten");
+    press(&mut w.h, "1 Stunde");
+    press(&mut w.h, "Übertragen");
+    press(&mut w.h, "Jetzt übertragen");
+    wait(&mut w.h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
+    assert!(has_part(&w, "Sendeintervall: abgelehnt"), "the refusal is named");
+    assert!(has_part(&w, "AT_PARAM_ERROR"), "with the device's reason");
+    assert!(!has(&w, "Neu starten, damit alle Änderungen wirken?"));
+    press(&mut w.h, "Schließen");
+    assert!(has(&w, "1 Änderung"), "the entry stays, to be corrected");
+    assert_eq!(w.link.cfg_value("TDC").as_deref(), Some("900"));
+}
+
+#[test]
+fn a_wrong_input_is_explained_and_blocks_the_transfer() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    press(&mut w.h, "Sendeintervall: 15 Minuten");
+    press(&mut w.h, "Eigener Wert…");
+    assert!(has(&w, "Sendeintervall: Eingabe"), "the dropdown gave way to a field");
+    w.h.state_mut().guided.form.as_mut().unwrap().apply(Edit::Set("TDC".into(), "bald".into()));
+    run(&mut w.h);
+    assert!(has(&w, "1 Änderung") && has_part(&w, "rot markierten"));
+    assert!(has(&w, "Bitte eine ganze Zahl eingeben."), "the German reason from the settings model");
+    press(&mut w.h, "Übertragen");
+    assert!(w.h.state().transfer.is_none(), "the button is off");
+    press(&mut w.h, "Alle zurücksetzen");
+    assert!(has(&w, "Keine Änderungen") && has(&w, "Sendeintervall: 15 Minuten"));
+}
+
+#[test]
+fn a_new_password_never_shows_in_clear() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    press(&mut w.h, "Weitere Einstellungen");
+    assert!(!has(&w, "Löschen: Gerätepasswort ändern"), "the device password can't be emptied");
+    w.h.state_mut().guided.form.as_mut().unwrap().apply(Edit::Set("PWORD".into(), "wolken".into()));
+    run(&mut w.h);
+    assert!(has(&w, "1 Änderung"));
+    press(&mut w.h, "Übertragen");
+    assert!(has(&w, "verdeckt") && has(&w, "neuer Wert (verdeckt)"));
+    assert!(has_part(&w, "lässt sich nicht rückgängig machen"));
+    assert!(!has_part(&w, "wolken") && !has_part(&w, S31_PASSWORD));
+    press(&mut w.h, "Jetzt übertragen");
+    wait(&mut w.h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
+    assert_eq!(w.link.cfg_value("PWORD").as_deref(), Some("wolken"), "the device got it");
+    assert!(has(&w, "Gerätepasswort ändern: übernommen"));
+    let text = w.h.state().log_text();
+    assert!(text.contains(">> ***************"), "the link masks the whole command: {text}");
+    assert!(!text.contains("wolken") && !text.contains(S31_PASSWORD), "{text}");
+    press(&mut w.h, "Schließen");
+    press(&mut w.h, "Experte");
+    assert!(!has_part(&w, "wolken") && !has_part(&w, S31_PASSWORD), "nor in the terminal on screen");
+}
+
+#[test]
+fn the_expert_tab_keeps_the_terminal_and_its_tools() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    assert!(!has(&w, "Send") && !has(&w, "Playbooks"));
+    press(&mut w.h, "Experte");
+    for label in ["Terminal", "Send", "Playbooks", "Sessions", "Firmware", "Send: Neu starten", "Disconnect"] {
+        assert!(has(&w, label), "{label}");
+    }
+    w.h.state_mut().cmd = "AT+TDC=?".into();
+    press(&mut w.h, "Send");
+    assert_eq!(w.sent(), ["AT+TDC=?"]);
+    press(&mut w.h, "Einstellungen");
+    assert!(has(&w, "Sendeintervall: 15 Minuten"), "the form is still there");
+}
+
+#[test]
+fn a_model_without_a_template_gets_a_hint_and_the_way_to_the_expert_view() {
+    let mut w = lay(FakeLink::configured("aa", "Sensor 7", "AT+MODEL=ZZ9-XX,v0.1.0\nAT+TDC=60\nOK"), &[]);
+    lay_connected(&mut w, "Sensor 7");
+    assert!(has(&w, "ZZ9-XX") && has_part(&w, "noch keine geführten Einstellungen"));
+    assert!(!has(&w, "Übertragen"));
+    press(&mut w.h, "Experten-Ansicht öffnen");
+    assert_eq!(w.h.state().view, View::Expert);
+    assert!(has(&w, "Terminal"));
+}
+
+#[test]
+fn a_device_that_keeps_its_settings_back_is_asked_for_the_password() {
+    // Answers every command with OK and no settings, as a locked console does not print them.
+    let mut w = lay(FakeLink::console("aa", "Sensor 7"), &[]);
+    lay_connected(&mut w, "Sensor 7");
+    assert!(has(&w, "Passwort: Eingabe") && has_part(&w, "Etikett"));
+    press(&mut w.h, "Anmelden");
+    assert!(w.sent().is_empty() && w.h.state().guided.notice.text.contains("Passwort eingeben"));
+    w.h.state_mut().pin = "349011".into();
+    press(&mut w.h, "Anmelden");
+    wait(&mut w.h, "the second read", |a| a.guided.password_tried && matches!(a.guided.read, Read::Failed(_)));
+    assert_eq!(w.sent(), ["******", "AT+CFG"], "the password goes out masked, then the settings are asked for again");
+    assert!(has_part(&w, "nicht angenommen"));
+    assert!(!w.h.state().log_text().contains("349011"));
+}
+
+#[test]
+fn the_password_typed_before_connecting_unlocks_and_the_status_card_fills() {
+    let link = s31();
+    link.reply("349011", &S31_BOOT.lines().collect::<Vec<_>>());
+    let mut w = lay(link, &[]);
+    w.h.state_mut().pin = "349011".into();
+    lay_connected(&mut w, S31_NAME);
+    assert_eq!(w.link.sent(), ["******", "AT+CFG"]);
+    wait(&mut w.h, "the start lines", |a| a.guided.status.signal.is_some());
+    for label in ["Passwort angenommen", "SIM-Karte erkannt", "Kein Netz · Band 8,20", "Zugangspunkt gesetzt"] {
+        assert!(has(&w, label), "{label}");
+    }
+    assert!(!has(&w, NO_NETWORK_HINT), "not at the first report");
+    // Minutes later.
+    w.h.state_mut().timing.no_network_hint = Duration::ZERO;
+    run(&mut w.h);
+    assert!(w.h.state().no_network_for_long());
+    assert!(has(&w, NO_NETWORK_HINT));
+    w.h.state_mut().feed_status("[30100]Signal Strength:17");
+    run(&mut w.h);
+    assert!(has(&w, "Netz gut · Band 8,20") && !has(&w, NO_NETWORK_HINT));
+}
+
+#[test]
+fn a_dropped_link_empties_the_guided_view_and_says_so() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    press(&mut w.h, "Sendeintervall: 15 Minuten");
+    press(&mut w.h, "1 Stunde");
+    w.link.drop_link();
+    wait(&mut w.h, "the drop", |a| a.conn == Conn::Idle);
+    run(&mut w.h);
+    assert!(w.h.state().guided.form.is_none());
+    assert!(has_part(&w, "Verbindung zum Gerät ist abgebrochen") && !has(&w, "Übertragen"));
+}
+
 #[cfg(feature = "screenshot")]
 #[test]
 #[ignore = "needs a GPU or a software renderer; run with --ignored"]
 fn screenshot() {
-    let out = std::env::var_os("AIRCORD_SHOTS").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let out =
+        std::env::var_os("AIRCORD_SHOTS").map(std::path::PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("aircord-guided"));
+    std::fs::create_dir_all(&out).unwrap();
     for (theme, name) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
-        let link = FakeLink::nb_node("6c1a3b52-8f0e-4d55-9a21-0e7d2c4b9f10", "D20-NB", IMEI);
-        link.add_nearby("2f9b7c1e-1d3a-4c8b-8e6f-5a4b3c2d1e0f", "D23-NB", -71);
-        link.add_nearby("9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d", "WQS-NB", -83);
-        link.add_nearby("1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e", "", -94);
-        link.reply("AT+VER", &["Dragino D20-NB v1.4.2", "OK"]);
+        let link = FakeLink::configured("6c1a3b52-8f0e-4d55-9a21-0e7d2c4b9f10", S31_NAME, S31_CFG);
+        link.add_nearby("2f9b7c1e-1d3a-4c8b-8e6f-5a4b3c2d1e0f", "866207050000002", -71);
+        link.add_nearby("9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d", "Sensor Keller", -88);
+        let mut boot: Vec<&str> = S31_BOOT.lines().collect();
+        boot.push("[30100]Signal Strength:21");
+        link.reply("349011", &boot);
         let dir = tempfile::tempdir().unwrap();
         let link = Arc::new(link);
         let inbox = Inbox::default();
         link.set_events(Arc::new(inbox.outbox()));
         let mut app = App::new(Arc::clone(&link) as Arc<dyn Link>, Stores::at(dir.path()), inbox);
         app.timing.settle = Duration::from_millis(10);
+        app.timing.read_wait = Duration::from_millis(300);
+        app.pin = "349011".into();
+        // The smallest window the app allows.
         let mut h = Harness::builder()
-            .with_size([1280.0, 780.0])
+            .with_size([900.0, 560.0])
             .with_max_steps(16)
             .with_step_dt(0.1)
             .wgpu()
             .build_ui_state(|ui, app: &mut App| app.show(ui), app);
         h.ctx.set_theme(theme);
         run(&mut h);
-        press(&mut h, "Scan");
-        press(&mut h, "Stop");
-        press(&mut h, "D20-NB");
-        press(&mut h, "Connect");
-        wait(&mut h, "the connection", |a| matches!(a.conn, Conn::Connected { .. }));
-        for cmd in ["AT+CFG", "AT+VER"] {
-            h.state_mut().send_cmd(cmd);
-        }
-        press(&mut h, "Read: Firmware version");
-        wait(&mut h, "the value", |a| !a.values.is_empty() && !a.values.values().any(|v| v == "…"));
-        h.state_mut().alert.ok("log copied to clipboard");
-        run(&mut h);
-        let image = h.render().unwrap();
-        image.save(out.join(format!("aircord-{name}.png"))).unwrap();
-        press(&mut h, "Playbooks");
-        let image = h.render().unwrap();
-        image.save(out.join(format!("aircord-playbooks-{name}.png"))).unwrap();
+        let shot = |h: &mut Harness<App>, what: &str| {
+            run(h);
+            h.render().unwrap().save(out.join(format!("aircord-{what}-{name}.png"))).unwrap();
+        };
+        press(&mut h, "Suchen");
+        press(&mut h, "Stopp");
+        press(&mut h, S31_NAME);
+        shot(&mut h, "devices");
+        press(&mut h, "Verbinden");
+        wait(&mut h, "the settings", |a| a.guided.read == Read::Ready && a.guided.status.signal.is_some_and(|s| s.has_network()));
+        press(&mut h, "Sendeintervall: 15 Minuten");
+        shot(&mut h, "dropdown");
+        press(&mut h, "1 Stunde");
+        h.state_mut().guided.form.as_mut().unwrap().apply(Edit::Set("SERVADDR".into(), "10.0.0.9,1883".into()));
+        shot(&mut h, "guided");
+        press(&mut h, "Übertragen");
+        shot(&mut h, "review");
+        press(&mut h, "Jetzt übertragen");
+        wait(&mut h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
+        shot(&mut h, "result");
+        press(&mut h, "Später");
+        press(&mut h, "Weitere Einstellungen");
+        shot(&mut h, "more");
+        press(&mut h, "Experte");
+        shot(&mut h, "expert");
     }
 }

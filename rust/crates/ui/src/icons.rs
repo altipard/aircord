@@ -33,6 +33,11 @@ pub enum Icon {
     History,
     Check,
     Warning,
+    Undo,
+    Reload,
+    Chevron,
+    Refused,
+    Unsure,
 }
 
 impl Icon {
@@ -60,6 +65,11 @@ impl Icon {
         Icon::History,
         Icon::Check,
         Icon::Warning,
+        Icon::Undo,
+        Icon::Reload,
+        Icon::Chevron,
+        Icon::Refused,
+        Icon::Unsure,
     ];
 }
 
@@ -225,6 +235,32 @@ pub fn outlines(icon: Icon) -> Vec<Outline> {
             g.closed(&[(12.0, 3.0), (21.5, 20.0), (2.5, 20.0)]);
             g.line(&[(12.0, 9.0), (12.0, 14.0)]);
             g.line(&[(12.0, 16.5), (12.0, 17.5)]);
+        }
+        Icon::Undo => {
+            // Back to what it was: an arrow turning round to the left.
+            g.line(&[(4.0, 9.0), (15.0, 9.0)]);
+            g.arc((15.0, 14.0), 5.0, -90.0, 90.0);
+            g.line(&[(15.0, 19.0), (8.0, 19.0)]);
+            g.line(&[(8.0, 5.0), (4.0, 9.0), (8.0, 13.0)]);
+        }
+        Icon::Reload => {
+            // Read again: most of a circle, an arrow head where it would close.
+            g.arc((12.0, 12.0), 8.0, -40.0, 270.0);
+            g.line(&[(12.0, 4.0), (16.0, 4.0)]);
+            g.line(&[(13.0, 1.5), (16.0, 4.0), (13.0, 7.0)]);
+        }
+        Icon::Chevron => g.line(&[(6.0, 9.5), (12.0, 15.5), (18.0, 9.5)]),
+        Icon::Refused => {
+            g.line(&[(8.5, 8.5), (15.5, 15.5)]);
+            g.line(&[(15.5, 8.5), (8.5, 15.5)]);
+            g.circle((12.0, 12.0), 9.0);
+        }
+        Icon::Unsure => {
+            // A question mark in the ring the check sits in.
+            g.arc((12.0, 10.0), 3.0, -180.0, 60.0);
+            g.line(&[(13.5, 12.6), (12.0, 14.2), (12.0, 15.0)]);
+            g.line(&[(12.0, 17.0), (12.0, 18.0)]);
+            g.circle((12.0, 12.0), 9.0);
         }
     }
     g.0

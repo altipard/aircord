@@ -28,6 +28,8 @@ use egui::{
 mod confirm;
 pub mod dialog;
 mod firmware;
+mod form;
+mod guided;
 pub mod icons;
 pub mod inbox;
 mod panel;
@@ -35,6 +37,7 @@ mod playbooks;
 mod sessions;
 pub mod style;
 mod widgets;
+mod xfer;
 
 #[cfg(test)]
 mod tests;
@@ -92,11 +95,30 @@ pub struct Timing {
     pub settle: Duration,
     /// For a playbook step's reply, and a read action's value.
     pub reply_wait: Duration,
+    /// For each reply while the settings are read or transferred.
+    pub read_wait: Duration,
+    /// How long a device may report no network before the guided view says what usually helps.
+    pub no_network_hint: Duration,
     pub ota: ota::Timing,
 }
 
 impl Timing {
-    pub const REAL: Timing = Timing { settle: Duration::from_secs(4), reply_wait: playbook::WAIT_TIMEOUT, ota: ota::Timing::REAL };
+    pub const REAL: Timing = Timing {
+        settle: Duration::from_secs(4),
+        reply_wait: playbook::WAIT_TIMEOUT,
+        read_wait: Duration::from_secs(5),
+        no_network_hint: Duration::from_secs(180),
+        ota: ota::Timing::REAL,
+    };
+}
+
+/// Which of the two faces the window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    /// Settings as a form, for people who do not know AT commands.
+    Guided,
+    /// The terminal, the control panel, playbooks, sessions and firmware.
+    Expert,
 }
 
 /// The selected device.
@@ -166,6 +188,17 @@ pub struct App {
     pub timing: Timing,
     styled: bool,
     now: f64,
+    pub view: View,
+
+    // the guided view
+    pub(crate) guided: guided::Guided,
+    pub(crate) transfer: Option<xfer::Transfer>,
+    /// Counts the connects, so settings read for an earlier link are dropped.
+    pub(crate) epoch: u64,
+    /// Stops the reading of settings when the link goes.
+    pub(crate) read_stop: Arc<AtomicBool>,
+    /// A restart was sent: the link going down is expected.
+    pub(crate) restarting: bool,
 
     // discovery
     pub display: Vec<Device>,
@@ -219,6 +252,12 @@ impl App {
             timing: Timing::REAL,
             styled: false,
             now: 0.0,
+            view: View::Guided,
+            guided: guided::Guided::default(),
+            transfer: None,
+            epoch: 0,
+            read_stop: Arc::new(AtomicBool::new(false)),
+            restarting: false,
             display: Vec::new(),
             total: 0,
             filter: String::new(),
@@ -351,6 +390,12 @@ impl App {
         self.tick(&ctx);
 
         Panel::top("titlebar").frame(widgets::chrome(Margin::symmetric(12, 5))).show(ui, |ui| self.title_bar(ui));
+        if self.view == View::Guided {
+            self.guided_view(ui);
+            self.transfer_window(&ctx);
+            self.confirm_window(&ctx);
+            return;
+        }
         Panel::top("options").frame(widgets::chrome(Margin::symmetric(12, 6))).show(ui, |ui| self.options_bar(ui));
         Panel::bottom("status").frame(widgets::chrome(Margin::symmetric(12, 3))).show(ui, |ui| self.status_bar(ui));
         Panel::left("rail")
@@ -421,19 +466,34 @@ impl App {
             Msg::Log(line) => {
                 if let Some(reply) = line.strip_prefix("<< ") {
                     self.try_capture(reply);
+                    self.feed_status(reply);
                 }
                 self.log_line(line);
             }
             Msg::LinkDropped => {
                 self.log_line("-- link dropped (device reset or out of range) — reconnect --");
                 self.set_disconnected("link dropped — reconnect");
+                if std::mem::take(&mut self.restarting) {
+                    self.guided.notice.ok("Das Gerät startet neu. In etwa einer Minute lässt es sich wieder verbinden.");
+                } else {
+                    self.guided.notice.warn("Die Verbindung zum Gerät ist abgebrochen. Bitte neu verbinden.");
+                }
             }
-            Msg::ScanFailed(e) => self.fail(e),
+            Msg::ScanFailed(e) => {
+                self.guided.notice.fail("Die Suche ist fehlgeschlagen. Ist Bluetooth eingeschaltet und für Aircord erlaubt?");
+                self.fail(e);
+            }
+            Msg::Cfg { epoch, result } => self.on_cfg(epoch, result),
+            Msg::Transfer(p) => self.on_transfer(p),
+            Msg::TransferDone(outcome) => self.on_transfer_done(outcome),
             Msg::Connected { name, addr, profile } => {
                 self.log_line(format!("-- connected via {profile} UART profile, ready --"));
                 self.set_connected(name, addr, profile);
             }
-            Msg::ConnectFailed => self.conn = Conn::Idle,
+            Msg::ConnectFailed => {
+                self.conn = Conn::Idle;
+                self.guided.notice.fail("Die Verbindung ist nicht zustande gekommen. Ist das Gerät eingeschaltet und in der Nähe?");
+            }
             Msg::Status(s) => self.set_status(s),
             Msg::Playbook(playbook::Report::Step { n, total, cmd }) => {
                 let name = self.running.as_ref().map(|r| r.0.clone()).unwrap_or_default();
@@ -531,7 +591,11 @@ impl App {
         self.stop_scan();
         self.conn = Conn::Connecting;
         self.set_status(format!("connecting to {}…", sel.name));
+        self.epoch += 1;
+        self.read_stop = Arc::new(AtomicBool::new(false));
+        self.restarting = false;
         let (link, out, pin, settle) = (Arc::clone(&self.link), self.outbox(), self.pin.trim().to_string(), self.timing.settle);
+        let (epoch, stop, read_wait) = (self.epoch, Arc::clone(&self.read_stop), self.timing.read_wait);
         std::thread::spawn(move || {
             out.log(format!("-- connecting to {} ({}) --", sel.name, sel.addr));
             let Some(profile) = link.connect(&sel.addr) else {
@@ -540,19 +604,19 @@ impl App {
             };
             let addr = link.current_addr().unwrap_or(sel.addr.clone());
             out.post(Msg::Connected { name: sel.name.clone(), addr, profile });
-            if pin.is_empty() {
+            // Four silent seconds after "connected" read as a hang: say what is happening.
+            let next = if pin.is_empty() { "reading the settings" } else { "sending PIN" };
+            out.post(Msg::Status(format!("connected: {} — settling, {next} in {}s", sel.name, settle.as_secs())));
+            out.log(format!("-- waiting {}s for the device to settle, then {next} --", settle.as_secs()));
+            std::thread::sleep(settle);
+            if !link.is_connected() {
+                out.log("-- link dropped during init --");
                 return;
             }
-            // Four silent seconds after "connected" read as a hang: say what is happening.
-            out.post(Msg::Status(format!("connected: {} — settling, PIN in {}s", sel.name, settle.as_secs())));
-            out.log(format!("-- waiting {}s for the device to settle, then sending PIN --", settle.as_secs()));
-            std::thread::sleep(settle);
-            if link.is_connected() {
-                link.send_secret(&pin);
-                out.post(Msg::Status(format!("connected: {}", sel.name)));
-            } else {
-                out.log("-- PIN skipped: link dropped during init --");
-            }
+            // The PIN first, if there is one, then the settings: the guided view's form, and the model for the template.
+            let result = guided::read_settings(&*link, Some(pin.as_str()).filter(|p| !p.is_empty()), read_wait, &stop);
+            out.post(Msg::Status(format!("connected: {}", sel.name)));
+            out.post(Msg::Cfg { epoch, result });
         });
     }
 
@@ -568,12 +632,18 @@ impl App {
         self.history = self.stores.history.get(&addr);
         self.set_status(format!("connected: {name}"));
         self.apply_template_for(&name);
+        self.guided_reset(guided::Read::Reading);
         self.conn = Conn::Connected { name, addr, profile };
         self.focus_cmd = true;
     }
 
     fn set_disconnected(&mut self, status: &str) {
         self.conn = Conn::Idle;
+        self.read_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.guided_reset(guided::Read::Idle);
+        if matches!(self.transfer, Some(xfer::Transfer { stage: xfer::Stage::Review, .. })) {
+            self.transfer = None;
+        }
         self.set_template(None);
         self.capture = None;
         self.picker = None;
@@ -652,6 +722,19 @@ impl App {
         ui.horizontal(|ui| {
             ui.set_min_height(26.0);
             widgets::brand(ui);
+            ui.add_space(10.0);
+            if widgets::tab(ui, "Einstellungen", self.view == View::Guided)
+                .on_hover_text("Das Gerät über ein Formular einstellen")
+                .clicked()
+            {
+                self.set_view(View::Guided);
+            }
+            if widgets::tab(ui, "Experte", self.view == View::Expert)
+                .on_hover_text("Terminal, Bedienfeld, Playbooks, Sessions und Firmware")
+                .clicked()
+            {
+                self.set_view(View::Expert);
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (icon, label) = if style::dark() { (Icon::Sun, "Light theme") } else { (Icon::Moon, "Dark theme") };
                 if icon_button(ui, icon, label).clicked() {
