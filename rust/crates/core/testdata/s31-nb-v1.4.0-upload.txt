@@ -1,0 +1,24 @@
+[22688]The IMSI number is:901405100000001.
+[22734]Password Correct
+[24262]Set the data format for sending and receiving.
+Currently set frequency band: 8,20
+[26959]Set APN successfully
+[28990]Exit sleep mode
+[33617]Signal Strength:17
+[38851]Network Information:"RSSI:-80","SINR:5","BAND:8"
+[40212]PSM mode configured 
+[41544]DNS configuration is successful
+[45889]Resolving domain name...
+[48925]Domain IP:10.60.2.239,4445
+[51888]*****Upload start:0*****
+[51923]remaining battery =3541 mv
+[51963]DS18B20(1) temp is -409.5
+[52067]adc_mV(1):0.00
+[52193]Humidity =46.08 %rh
+[52223]tem =23.56 C
+[53761]Open a Socket Service successfully
+[57841]Upload data successfully
+[60880]Datagram is sent by RF
+[62414]Close the port successfully
+[63453]Send complete
+[64477]*****End of upload*****
