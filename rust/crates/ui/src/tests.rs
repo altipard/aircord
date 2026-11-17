@@ -631,8 +631,10 @@ fn a_model_without_a_template_gets_a_hint_and_the_way_to_the_expert_view() {
 
 #[test]
 fn a_device_that_keeps_its_settings_back_is_asked_for_the_password() {
-    // Answers every command with OK and no settings, as a locked console does not print them.
-    let mut w = lay(FakeLink::console("aa", "Sensor 7"), &[]);
+    // Takes every command and stays silent when asked for its settings.
+    let link = FakeLink::console("aa", "Sensor 7");
+    link.reply("AT+CFG", &[]);
+    let mut w = lay(link, &[]);
     lay_connected(&mut w, "Sensor 7");
     assert!(has(&w, "Passwort: Eingabe") && has_part(&w, "Etikett"));
     press(&mut w.h, "Anmelden");
@@ -643,6 +645,18 @@ fn a_device_that_keeps_its_settings_back_is_asked_for_the_password() {
     assert_eq!(w.sent(), ["******", "AT+CFG"], "the password goes out masked, then the settings are asked for again");
     assert!(has_part(&w, "nicht angenommen"));
     assert!(!w.h.state().log_text().contains("349011"));
+}
+
+#[test]
+fn an_answer_that_is_no_settings_does_not_ask_for_the_password() {
+    for reply in [&["AT_ERROR"][..], &["AT+TDC=900", "OK"], &["OK"]] {
+        let link = FakeLink::console("aa", "Sensor 7");
+        link.reply("AT+CFG", reply);
+        let mut w = lay(link, &[]);
+        lay_connected(&mut w, "Sensor 7");
+        assert!(matches!(w.h.state().guided.read, Read::Failed(_)), "{reply:?}");
+        assert!(!has(&w, "Passwort: Eingabe") && has(&w, "Erneut lesen"), "{reply:?}");
+    }
 }
 
 #[test]

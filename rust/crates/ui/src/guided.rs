@@ -442,10 +442,11 @@ impl App {
         (left > 0.0).then_some(left)
     }
 
-    /// Whether to ask for the device's password: its settings did not come and it never said the password was right.
-    /// A device does not announce that it wants one, so this is the one place that decides.
+    /// Whether to ask for the device's password: it stayed silent when asked for its settings and never said the
+    /// password was right. A device does not announce that it wants one, so this is the one place that decides. A
+    /// refusal or a dump without a model is an answer, and a password would not change it.
     pub(crate) fn wants_password(&self) -> bool {
-        matches!(self.guided.read, Read::Failed(_)) && !self.guided.status.password_ok
+        matches!(&self.guided.read, Read::Failed(why) if Failure::of(why) == Failure::Timeout) && !self.guided.status.password_ok
     }
 
     /// The settings arrived, or did not.
