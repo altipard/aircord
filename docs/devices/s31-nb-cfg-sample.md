@@ -7,7 +7,7 @@ Mitschrift eines echten Geräts, Grundlage für die Einstellungen in Aircord
 - Gerät: Dragino S31-NB, Firmware v1.4.0, Modul BC660K-GL
 - SIM: 1NCE
 - Datum: 2026-11-17
-- Verbindung über BLE mit Aircord, danach Eingabe des Passworts vom Etikett
+- Verbindung über BLE, danach Eingabe des Passworts vom Etikett
 
 IMEI, IMSI und Passwort sind durch Beispielwerte bzw. `******` ersetzt. Die
 Testdaten unter `rust/crates/core/testdata/` enthalten dieselbe Ausgabe mit
@@ -15,8 +15,9 @@ einem erfundenen Klartext-Passwort, damit der Test der Maskierung etwas prüft.
 
 ## Startbanner
 
-Kommt nach Verbindung und Passwort von selbst, ohne Befehl. Zeitstempel in
-Millisekunden seit dem Start.
+Kommt nach Verbindung und Passwort von selbst, ohne Befehl. Die Zahl in eckigen
+Klammern ist ein Zeitstempel des Geräts; die Einheit ist nicht dokumentiert
+(vermutlich Millisekunden).
 
 ```text
 [6902]NB module is initializing...
@@ -34,9 +35,9 @@ Currently set frequency band: 8,20
 [28891]Signal Strength:99
 ```
 
-Die Zeile `Signal Strength:<n>` wiederholt das Gerät etwa alle 10 Sekunden,
-auch mitten in anderen Ausgaben. `99` heißt kein Netz, sonst ist `n` der
-CSQ-Wert 0–31. Die Zeile mit dem Band hat keinen Zeitstempel.
+Die Zeile `Signal Strength:<n>` wiederholt das Gerät etwa alle 10 Sekunden.
+`99` heißt kein Netz; Werte 0–31 sind laut Inventar die übliche CSQ-Skala (im
+Test nicht beobachtet). Die Zeile mit dem Band hat keinen Zeitstempel.
 
 ## `AT+CFG`
 

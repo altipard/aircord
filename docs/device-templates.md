@@ -6,9 +6,11 @@ configuring a sensor should not have to remember whether the uplink interval is
 `AT+TDC=` or `AT+TXP=`.
 
 A template can also describe the device's **settings** as typed fields
-(`[[setting]]`): Aircord reads the current values with `AT+CFG`, shows them as a
-form, sends only what changed and reads `AT+CFG` again to check the result. See
-[Settings](#settings).
+(`[[setting]]`): the current values come from `AT+CFG`, only what changed is
+sent, and `AT+CFG` is read again to check the result. See [Settings](#settings).
+The Rust core (`rust/crates/core`: `settings`, `cfg`, `transfer`) implements
+this; the settings form in the window is not built yet, and the Go build ignores
+`[[setting]]`.
 
 Templates are TOML. Aircord ships presets inside the binary, and reads your own
 from `<config>/aircord/templates/`. A file whose `name` matches a preset
@@ -40,10 +42,13 @@ A template needs at least one action or setting. Files with only `[[action]]`
 tables, as written before settings existed, stay valid.
 
 On connect, Aircord picks the first template whose `match` fits the device name.
-Once `AT+CFG` has been read, the first template (in name order) whose `model`
-fits the `AT+MODEL` value takes precedence: the advertised name of a Dragino NB
-node is usually its IMEI and says nothing about the model. You can always
-override the choice from the dropdown in the panel header.
+You can always override the choice from the dropdown in the panel header.
+
+`model` is for selection once `AT+CFG` has been read: the core's
+`Templates::select` prefers the first template (in name order) whose `model`
+fits the `AT+MODEL` value and falls back to `match`, because the advertised name
+of a Dragino NB node is usually its IMEI and says nothing about the model. The
+window does not call it yet.
 
 ## Action types
 
@@ -185,21 +190,29 @@ mindestens 180 Sekunden eingeben." A line break in any value is refused.
 
 ### Reading, transferring, verifying
 
-1. Aircord sends `AT+CFG` and reads every `AT+<KEY>=<value>` line up to `OK`.
+What the core does (`rust/crates/core/src/transfer.rs`); the window will build
+on it:
+
+1. `read_cfg` sends `AT+CFG` and reads every `AT+<KEY>=<value>` line up to `OK`.
    Blank lines, echoes, banners and the `Signal Strength:` lines a node prints
    every few seconds are skipped; `NULL` reads as empty.
-2. The form offers the settings whose `key` the device reported. A setting the
-   device does not report is not available and is never sent blind.
-3. On transfer, only values that differ from the device's are checked and sent,
-   in template order. Numbers compare by value (`0900` is `900`). Settings
-   hidden by `visible_if` are left out.
-4. Each command must be answered with `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and the
-   other `AT_…ERROR` lines mark that field as failed; the others are still sent.
-5. Aircord reads `AT+CFG` again and reports each field as verified, different
+2. `Template::settings_for` lists the settings whose `key` the device reported.
+   A setting the device does not report is not available and is never sent
+   blind.
+3. `plan` compares the wanted values with the device's and checks only those
+   that differ, in template order. Numbers compare by value (`0900` is `900`).
+   Settings hidden by `visible_if` are left out. A value cannot be cleared:
+   empty input is refused and `NULL` is never sent. `needing_confirmation` names
+   the `network` and `irreversible` changes to ask about.
+4. `apply` sends each change and waits for `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and
+   the other `AT_…ERROR` lines mark that field as failed; the others are still
+   sent.
+5. It then reads `AT+CFG` again and reports each field as verified, different
    (the device answered `OK` but kept another value) or failed, or as unverified
    when the read-back did not show it.
-6. When a taken change has `needs_reboot`, Aircord offers the restart action of
-   the template (a `button` with `cmd = "ATZ"`).
+6. When a taken change has `needs_reboot`, the outcome says a restart is due and
+   `Template::reboot_action` names the template's restart (a `button` with
+   `cmd = "ATZ"`). Nothing in the core sends it.
 
 A worked example of real `AT+CFG` output is in
 [devices/s31-nb-cfg-sample.md](devices/s31-nb-cfg-sample.md).
@@ -207,10 +220,17 @@ A worked example of real `AT+CFG` output is in
 ### Passwords
 
 `AT+PWORD` (device password), `AT+PWD` (MQTT password) and `AT+OTAPWD` are
-always masked as `******`, whatever the template says: in commands Aircord
-sends, in results it reports, and in every line it shows. Settings of
-`type = "secret"` are masked the same way. Some firmware prints `AT+PWORD` in
-clear in `AT+CFG`, so this matters for any transcript you save or share.
+treated as secret whatever the template says, and so are settings of
+`type = "secret"`. Some firmware prints `AT+PWORD` in clear in `AT+CFG`, so this
+matters for any transcript you save or share.
+
+- A transfer sends secrets through `Link::send_secret`, so the echo in the log
+  is masked, and no change, result or `{:?}` output carries their value.
+- `redact::redact_line` (or `Template::redact`, which adds the template's
+  secrets) masks the value in any line as `******`.
+- Not yet done: the link logs reply lines (`<< AT+PWORD=…`) as they arrive, in
+  clear. Masking the terminal and saved transcripts needs the logging side to
+  pass every line through `redact_line`.
 
 ## Validation
 
