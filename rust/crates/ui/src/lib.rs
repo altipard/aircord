@@ -659,6 +659,11 @@ impl App {
             }
             // The PIN first, if there is one, then the settings: the guided view's form, and the model for the template.
             let result = guided::read_settings(&*link, Some(pin.as_str()).filter(|p| !p.is_empty()), read_wait, &stop);
+            // The read can outlast the link: a status for a device already let go of would overwrite "disconnected",
+            // or name the wrong device once another one is connected.
+            if generation.load(std::sync::atomic::Ordering::Relaxed) != mine {
+                return;
+            }
             out.post(Msg::Status(format!("connected: {}", sel.name)));
             if stop.load(std::sync::atomic::Ordering::Relaxed) {
                 return;

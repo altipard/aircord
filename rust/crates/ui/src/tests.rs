@@ -695,6 +695,18 @@ fn a_device_card_names_its_signal_and_whether_it_is_connected() {
 }
 
 #[test]
+fn a_read_that_outlasts_the_link_does_not_claim_a_connection() {
+    let mut w = world(slow());
+    reading(&mut w, "Sensor 7");
+    press(&mut w.h, "Disconnect");
+    assert_eq!(w.h.state().status, "disconnected");
+    std::thread::sleep(Duration::from_millis(700));
+    run(&mut w.h);
+    assert_eq!(w.h.state().status, "disconnected", "the connect's thread ended without a word");
+    assert_eq!(w.h.state().guided.read, Read::Idle);
+}
+
+#[test]
 fn a_restart_without_a_link_says_so_and_sends_nothing() {
     let mut w = lay(s31(), &[]);
     lay_connected(&mut w, S31_NAME);
