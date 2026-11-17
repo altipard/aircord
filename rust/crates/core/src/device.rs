@@ -491,7 +491,11 @@ type  = "select"
         fs::write(d.path().join("notes.txt"), "ignored").unwrap();
         let t = Templates::load_from(d.path());
         assert_eq!(t.get("Dragino NB-IoT").unwrap().actions[0].label, "Mine");
-        assert_eq!(t.names(), ["Dragino NB-IoT", "Zed"]);
+        assert_eq!(
+            t.names(),
+            ["Dragino D20-NB", "Dragino D22-NB", "Dragino D23-NB", "Dragino NB-IoT", "Dragino S31-NB", "Dragino WQS-NB", "Zed"],
+            "the user's Zed is added, the presets stay, the override replaces rather than duplicates"
+        );
         assert_eq!(t.errors().len(), 1);
         assert!(t.errors()[0].starts_with("bad.toml"));
     }

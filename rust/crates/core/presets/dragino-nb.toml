@@ -4,6 +4,11 @@
 # with typed settings. Kept in step with internal/device/presets/dragino-nb.toml
 # of the Go build.
 #
+# Interim: this preset goes away with the settings UI. Until then the window's
+# control panel and its tests depend on it. The "Firmware version" action sends
+# AT+VER, which Dragino does not document (see
+# docs/devices/dragino-nb-at-commands.md, open point 2).
+#
 # To customise, copy this file into your config dir — …/aircord/templates/ —
 # and edit there; a file with the same `name` overrides this preset.
 #
