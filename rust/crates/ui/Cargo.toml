@@ -1,6 +1,6 @@
 [package]
 name = "aircord-ui"
-description = "Aircord's desktop window in egui, in BIMCraft's look: a thin shell over aircord-core"
+description = "Aircord's desktop window in egui, in PhotoCraft's look: a thin shell over aircord-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

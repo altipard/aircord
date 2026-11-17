@@ -1,10 +1,11 @@
-//! `aircord-ui`: the desktop window, in egui, in BIMCraft's look. A thin shell: what the app does lives in
+//! `aircord-ui`: the desktop window, in egui, in PhotoCraft's look. A thin shell: what the app does lives in
 //! `aircord-core`; this draws it, and runs the long jobs (connect, a playbook, a firmware update) on threads of their own
 //! that report through [`inbox::Outbox`].
 //!
-//! The layout: a tool bar over everything; the device list on the left with the PIN and Connect under it; the terminal
-//! and the command line in the middle; the device's control panel on the right; the status bar at the bottom. Dialogs
-//! are modal: sessions, playbooks, firmware, and the confirmations.
+//! The layout, PhotoCraft's frame: a title bar with the light/dark switch at its right; an options bar with Scan and
+//! a hint for what to do next; a narrow icon rail on the left for the dialogs; then, on the dock, the device list card
+//! with the PIN and Connect under it, the terminal and the command line in the middle, the device's control panel card
+//! on the right; the status bar at the bottom. Dialogs are modal: sessions, playbooks, firmware, and the confirmations.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -21,7 +22,7 @@ use aircord_core::session::Sessions;
 use aircord_core::{config, filter, ota};
 use egui::{
     Align, Align2, CentralPanel, Color32, Context, FontId, Frame, Id, Key, Layout, Margin, Modifiers, Panel, Rect, RichText, ScrollArea,
-    Sense, Stroke, TextEdit, Theme, Ui, WidgetInfo, WidgetType, vec2,
+    Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, WidgetType, vec2,
 };
 
 mod confirm;
@@ -41,8 +42,8 @@ mod tests;
 use confirm::Confirm;
 use icons::Icon;
 use inbox::{Inbox, Msg, Outbox};
-use style::pal;
-use widgets::{Alert, Tone, button, icon_button};
+use style::{RADIUS, RADIUS_SM, pal};
+use widgets::{Alert, Tone, button, icon_button, rail_button};
 
 /// How many terminal lines are kept.
 pub const MAX_LOG_LINES: usize = 2000;
@@ -313,15 +314,40 @@ impl App {
         self.dialog_answered();
         self.tick(&ctx);
 
-        let bar = Frame::new().fill(pal().bar).inner_margin(Margin::symmetric(8, 6)).stroke(Stroke::new(1.0, pal().border));
-        Panel::top("toolbar").frame(bar).show(ui, |ui| self.toolbar(ui));
-        Panel::bottom("status")
-            .frame(Frame::new().fill(pal().bar).inner_margin(Margin::symmetric(10, 4)))
-            .show(ui, |ui| self.status_bar(ui));
-        let side = Frame::new().fill(pal().panel).inner_margin(Margin::same(10));
-        Panel::left("devices").frame(side).resizable(true).default_size(330.0).min_size(260.0).show(ui, |ui| self.devices_panel(ui));
-        Panel::right("panel").frame(side).resizable(true).default_size(300.0).min_size(240.0).show(ui, |ui| self.control_panel(ui));
-        CentralPanel::default().frame(Frame::new().fill(pal().panel).inner_margin(Margin::same(10))).show(ui, |ui| self.console(ui));
+        Panel::top("titlebar").frame(widgets::chrome(Margin::symmetric(12, 5))).show(ui, |ui| self.title_bar(ui));
+        Panel::top("options").frame(widgets::chrome(Margin::symmetric(12, 6))).show(ui, |ui| self.options_bar(ui));
+        Panel::bottom("status").frame(widgets::chrome(Margin::symmetric(12, 3))).show(ui, |ui| self.status_bar(ui));
+        Panel::left("rail")
+            .frame(widgets::chrome(Margin::symmetric(4, 8)))
+            .resizable(false)
+            .exact_size(widgets::RAIL_W + 8.0)
+            .show(ui, |ui| self.rail(ui));
+        // The dock: the cards sit on it 8 pt apart, as PhotoCraft's panels do.
+        let dock = |m: Margin| Frame::new().fill(pal().dock).inner_margin(m);
+        // The docks start narrower in a small window, so the terminal keeps room beside them.
+        let room = ui.available_width();
+        Panel::left("devices")
+            .frame(dock(Margin { left: 8, right: 4, top: 8, bottom: 8 }))
+            .show_separator_line(false)
+            .resizable(true)
+            .default_size((room * 0.28).clamp(260.0, 330.0))
+            .min_size(260.0)
+            .show(ui, |ui| {
+                widgets::card().show(ui, |ui| self.devices_panel(ui));
+            });
+        Panel::right("panel")
+            .frame(dock(Margin { left: 4, right: 8, top: 8, bottom: 8 }))
+            .show_separator_line(false)
+            .resizable(true)
+            .default_size((room * 0.26).clamp(240.0, 300.0))
+            .min_size(240.0)
+            .show(ui, |ui| {
+                widgets::card().show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    self.control_panel(ui);
+                });
+            });
+        CentralPanel::default().frame(dock(Margin::symmetric(4, 8))).show(ui, |ui| self.console(ui));
 
         self.picker_window(&ctx);
         self.modal_window(&ctx);
@@ -579,7 +605,23 @@ impl App {
 
     // ---------- drawing ----------
 
-    fn toolbar(&mut self, ui: &mut Ui) {
+    /// The title bar: the brand at the left, the light/dark switch at the right (a moon in light, a sun in dark).
+    fn title_bar(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.set_min_height(26.0);
+            widgets::brand(ui);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (icon, label) = if style::dark() { (Icon::Sun, "Light theme") } else { (Icon::Moon, "Dark theme") };
+                if icon_button(ui, icon, label).clicked() {
+                    style::toggle(ui.ctx());
+                    ui.ctx().request_repaint();
+                }
+            });
+        });
+    }
+
+    /// The options bar, PhotoCraft's tool options: the discovery actions, then a hint for what to do next.
+    fn options_bar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let scanning = self.link.is_scanning();
@@ -590,27 +632,9 @@ impl App {
             if button(ui, Some(Icon::Clear), "Clear list", Tone::Plain).clicked() {
                 self.clear_list();
             }
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(6.0);
-            if button(ui, Some(Icon::Sessions), "Sessions", Tone::Plain)
-                .on_hover_text("Save or restore the device list, target and PIN")
-                .clicked()
-            {
-                self.open_sessions();
-            }
-            if button(ui, Some(Icon::Playbooks), "Playbooks", Tone::Plain).on_hover_text("Replay a sequence of AT commands").clicked() {
-                self.open_playbooks();
-            }
-            if button(ui, Some(Icon::Firmware), "Firmware", Tone::Plain).on_hover_text("Flash a Dragino NB node over BLE").clicked() {
-                self.open_firmware();
-            }
+            widgets::vline(ui, 20.0);
+            ui.label(RichText::new(self.hint()).color(pal().muted));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let dark = style::dark();
-                let label = if dark { "Light theme" } else { "Dark theme" };
-                if icon_button(ui, Icon::Theme, label).clicked() {
-                    ui.ctx().set_theme(if dark { Theme::Light } else { Theme::Dark });
-                }
                 if let Some((name, stop)) = &self.running {
                     let name = name.clone();
                     if button(ui, Some(Icon::Stop), "Stop playbook", Tone::Danger)
@@ -624,40 +648,73 @@ impl App {
         });
     }
 
+    /// What to do next, for the options bar.
+    fn hint(&self) -> &'static str {
+        match (&self.conn, self.link.is_scanning(), self.selected.is_some()) {
+            (Conn::Bootloader { .. }, ..) => "A firmware update holds the link",
+            (Conn::Connected { .. }, ..) => "Type an AT command below, or use the control panel",
+            (Conn::Connecting, ..) => "Connecting…",
+            (Conn::Idle, _, true) => "Connect to the selected device, under the list",
+            (Conn::Idle, true, false) => "Scanning — pick a device in the list",
+            (Conn::Idle, false, false) if self.total > 0 => "Pick a device in the list",
+            (Conn::Idle, false, false) => "Scan to discover nearby BLE devices",
+        }
+    }
+
+    /// The icon rail: the dialogs, the open one marked.
+    fn rail(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            let open = |m: &Option<Modal>| match m {
+                Some(Modal::Sessions(_)) => 0,
+                Some(Modal::Playbooks(_)) => 1,
+                Some(Modal::Firmware(_)) => 2,
+                None => usize::MAX,
+            };
+            let open = open(&self.modal);
+            if rail_button(ui, Icon::Sessions, "Sessions", "Sessions — save or restore the device list, target and PIN", open == 0)
+                .clicked()
+            {
+                self.open_sessions();
+            }
+            if rail_button(ui, Icon::Playbooks, "Playbooks", "Playbooks — replay a sequence of AT commands", open == 1).clicked() {
+                self.open_playbooks();
+            }
+            if rail_button(ui, Icon::Firmware, "Firmware", "Firmware — flash a Dragino NB node over BLE", open == 2).clicked() {
+                self.open_firmware();
+            }
+        });
+    }
+
+    /// The status bar, in PhotoCraft's segments: the link, the list, then what is happening.
     fn status_bar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
+            ui.set_min_height(20.0);
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let (dot, text) = match &self.conn {
+                Conn::Idle => (pal().disabled, "not connected".to_string()),
+                Conn::Connecting => (pal().warn, "connecting…".to_string()),
+                Conn::Connected { name, profile, .. } => (pal().ok, format!("{name} · {profile}")),
+                Conn::Bootloader { name } => (pal().warn, format!("bootloader {name}")),
+            };
+            widgets::dot(ui, dot);
+            ui.label(RichText::new(text).color(pal().text));
+            widgets::vline(ui, 16.0);
+            ui.label(RichText::new(format!("{}/{} devices", self.display.len(), self.total)).color(pal().text));
+            widgets::vline(ui, 16.0);
             ui.label(RichText::new(&self.status).color(pal().muted));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (dot, text) = match &self.conn {
-                    Conn::Idle => (pal().muted, "not connected".to_string()),
-                    Conn::Connecting => (pal().warn, "connecting…".to_string()),
-                    Conn::Connected { name, profile, .. } => (pal().ok, format!("{name} · {profile}")),
-                    Conn::Bootloader { name } => (pal().warn, format!("bootloader {name}")),
-                };
-                ui.label(RichText::new(text).color(pal().text));
-                let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-                ui.painter().circle_filled(r.center(), 4.0, dot);
-                ui.add_space(12.0);
-                ui.label(RichText::new(format!("{}/{} devices", self.display.len(), self.total)).monospace().color(pal().muted));
-            });
         });
     }
 
     fn devices_panel(&mut self, ui: &mut Ui) {
-        widgets::section(ui, "DEVICES");
-        ui.add_space(4.0);
-        let field = ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(18.0, 24.0), Sense::hover());
-            icons::paint(ui.painter(), Icon::Search, Rect::from_center_size(r.center(), vec2(15.0, 15.0)), pal().muted);
-            ui.add(
-                TextEdit::singleline(&mut self.filter).hint_text("filter — regex or substring (8606, ^D20)").desired_width(f32::INFINITY),
-            )
-        });
-        if field.inner.changed() {
+        ui.set_min_size(ui.available_size());
+        widgets::section(ui, "Devices");
+        let edit = TextEdit::singleline(&mut self.filter).hint_text("filter — regex or substring (8606, ^D20)");
+        if widgets::field(ui, edit, Some(Icon::Search), None, ui.available_width()).changed() {
             self.snapshot();
             self.set_status(format!("{}/{} shown", self.display.len(), self.total));
         }
-        ui.add_space(6.0);
+        ui.add_space(2.0);
 
         // The connection, pinned to the panel's foot.
         Panel::bottom("connect")
@@ -672,24 +729,19 @@ impl App {
         let cols = [width * 0.44, width * 0.16, width * 0.40];
         // The header: each column title sorts by it, a second click reverses.
         let (head, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
-        ui.painter().hline(head.x_range(), head.bottom(), Stroke::new(1.0, pal().border));
+        ui.painter().hline(head.x_range(), head.bottom(), Stroke::new(1.0, pal().separator));
         let mut x = head.left();
         for (i, column) in Column::ALL.into_iter().enumerate() {
             let rect = Rect::from_min_size(egui::pos2(x, head.top()), vec2(cols[i], head.height()));
             let r = ui.interact(rect, Id::new(("sort", i)), Sense::click());
             r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, column.title()));
             if r.hovered() {
-                ui.painter().rect_filled(rect, 3.0, pal().hover_fill);
+                ui.painter().rect_filled(rect, RADIUS_SM, pal().hover_fill);
             }
             let active = self.sort.column == column;
             let ink = if active { pal().text } else { pal().muted };
-            let text = ui.painter().text(
-                rect.left_center() + vec2(6.0, 0.0),
-                Align2::LEFT_CENTER,
-                column.title(),
-                FontId::proportional(12.0),
-                ink,
-            );
+            let text =
+                ui.painter().text(rect.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, column.title(), style::medium(11.5), ink);
             if active {
                 // The direction as a drawn triangle: the UI font has no arrow glyphs.
                 let c = egui::pos2(text.right() + 8.0, rect.center().y);
@@ -707,7 +759,7 @@ impl App {
         if self.display.is_empty() {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("No devices yet").strong().color(pal().text));
+                ui.label(RichText::new("No devices yet").font(style::semibold(13.0)).color(pal().text));
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new("Press Scan to discover nearby devices.\nmacOS asks for Bluetooth permission on the first scan.")
@@ -727,23 +779,16 @@ impl App {
                 let label = if d.name.is_empty() { d.addr.clone() } else { d.name.clone() };
                 let is_sel = selected.as_deref() == Some(d.addr.as_str());
                 r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_sel, &label));
-                let fill = if is_sel {
-                    pal().select_fill
+                // Flat rows, as PhotoCraft's lists: the selection a soft accent pill, hover a grey one.
+                let (fill, stroke) = if is_sel {
+                    (pal().select_fill, Stroke::new(1.0, pal().accent_border))
                 } else if r.hovered() {
-                    pal().hover_fill
-                } else if i % 2 == 1 {
-                    pal().bar
+                    (pal().hover_fill, Stroke::NONE)
                 } else {
-                    Color32::TRANSPARENT
+                    (Color32::TRANSPARENT, Stroke::NONE)
                 };
                 let p = ui.painter();
-                p.rect_filled(rect, 3.0, fill);
-                if is_sel {
-                    p.line_segment(
-                        [rect.left_top() + vec2(1.0, 4.0), rect.left_bottom() + vec2(1.0, -4.0)],
-                        Stroke::new(3.0, pal().accent),
-                    );
-                }
+                p.rect(rect.shrink2(vec2(0.0, 1.0)), RADIUS_SM, fill, stroke, StrokeKind::Inside);
                 let mut x = rect.left() + 6.0;
                 let (name, name_ink) =
                     if d.name.is_empty() { ("(no name)".to_string(), pal().muted) } else { (d.name.clone(), pal().text) };
@@ -771,12 +816,12 @@ impl App {
     fn connect_row(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("PIN").color(pal().muted));
-            let pin =
-                TextEdit::singleline(&mut self.pin).password(true).hint_text("optional, sent on connect").desired_width(f32::INFINITY);
             // A password field: this window gets screen-shared and photographed in the field.
-            ui.add(pin).on_hover_text("Sent once the link has settled; never written to the log");
+            let pin = TextEdit::singleline(&mut self.pin).password(true).hint_text("optional, sent on connect");
+            widgets::field(ui, pin, None, None, ui.available_width())
+                .on_hover_text("Sent once the link has settled; never written to the log");
         });
-        ui.add_space(4.0);
+        ui.add_space(2.0);
         ui.horizontal(|ui| {
             let can_connect = self.selected.is_some() && self.conn == Conn::Idle && !self.ota_running();
             let target = self.selected.as_ref().map_or("select a device first".to_string(), |s| format!("Connect to {}", s.name));
@@ -798,7 +843,16 @@ impl App {
     fn console(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         ui.horizontal(|ui| {
-            widgets::section(ui, "TERMINAL");
+            // The terminal as PhotoCraft's open document: a tab naming it and the link it talks over.
+            let detail = match &self.conn {
+                Conn::Connected { profile, .. } => format!("{profile} UART"),
+                Conn::Bootloader { .. } => "bootloader".into(),
+                Conn::Connecting => "connecting…".into(),
+                Conn::Idle => "offline".into(),
+            };
+            // A narrow column keeps the title and the tools; the detail is in the status bar too.
+            let detail = if ui.available_width() < 320.0 { String::new() } else { detail };
+            widgets::doc_tab(ui, "Terminal", &detail);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if icon_button(ui, Icon::Delete, "Clear log").clicked() {
                     self.log.clear();
@@ -819,20 +873,21 @@ impl App {
             .show_separator_line(false)
             .show(ui, |ui| self.command_row(ui));
 
-        let term = Frame::new().fill(pal().surface).stroke(Stroke::new(1.0, pal().border)).corner_radius(4).inner_margin(Margin::same(8));
+        let term =
+            Frame::new().fill(pal().card).stroke(Stroke::new(1.0, pal().card_border)).corner_radius(RADIUS).inner_margin(Margin::same(10));
         term.show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.spacing_mut().item_spacing.y = 0.0;
-            let font = FontId::monospace(12.5);
-            let row_h = ui.fonts_mut(|f| f.row_height(&font)) + 3.0;
+            let font = FontId::monospace(12.0);
+            let row_h = ui.fonts_mut(|f| f.row_height(&font)) + 4.0;
             let n = self.log.len();
             ScrollArea::both().auto_shrink([false, false]).stick_to_bottom(true).show_rows(ui, row_h, n, |ui, range| {
                 for i in range {
                     let Some(line) = self.log.get(i) else { continue };
-                    // One label a line, the time muted before it: each line selectable, rows a fixed height.
+                    // One label a line, the time faint before it: each line selectable, rows a fixed height.
                     let mut job = egui::text::LayoutJob::default();
                     let fmt = |color| egui::TextFormat { font_id: font.clone(), color, line_height: Some(row_h), ..Default::default() };
-                    job.append(&line.time, 0.0, fmt(pal().muted.gamma_multiply(0.8)));
+                    job.append(&line.time, 0.0, fmt(pal().faint));
                     job.append(&line.text, 10.0, fmt(line_ink(&line.text)));
                     ui.add(egui::Label::new(job).extend().selectable(true));
                 }
@@ -849,14 +904,12 @@ impl App {
                 self.open_picker();
             }
             let send_w = 96.0 + 34.0;
-            let edit = ui.add_enabled(
-                open,
-                TextEdit::singleline(&mut self.cmd)
-                    .id(id)
-                    .font(egui::TextStyle::Monospace)
-                    .hint_text("AT command (e.g. AT+CFG) — Enter sends, Up opens the history")
-                    .desired_width(ui.available_width() - send_w),
-            );
+            let line = TextEdit::singleline(&mut self.cmd)
+                .id(id)
+                .font(egui::TextStyle::Monospace)
+                .hint_text("AT command (e.g. AT+CFG) — Enter sends, Up opens the history");
+            let width = ui.available_width() - send_w;
+            let edit = ui.add_enabled_ui(open, |ui| widgets::field(ui, line, None, None, width)).inner;
             if std::mem::take(&mut self.focus_cmd) && open {
                 edit.request_focus();
             }
@@ -927,9 +980,8 @@ impl App {
                 Frame::popup(ui.style()).fill(pal().surface).show(ui, |ui| {
                     ui.set_width(520.0);
                     ui.label(RichText::new("History — Up/Down select · Enter runs · Right edits · Esc closes").color(pal().muted));
-                    let f = ui.add(
-                        TextEdit::singleline(&mut p.filter).hint_text("filter history — regex/substring").desired_width(f32::INFINITY),
-                    );
+                    let filter = TextEdit::singleline(&mut p.filter).hint_text("filter history — regex/substring");
+                    let f = widgets::field(ui, filter, Some(Icon::Search), None, ui.available_width());
                     if std::mem::take(&mut p.focus) {
                         f.request_focus();
                     }
