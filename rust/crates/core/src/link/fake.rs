@@ -10,7 +10,7 @@ use crate::cfg::setting_line;
 use crate::lines::{Tap, Taps, lock};
 use crate::link::{Device, Events, Link, mask, summarize_line};
 use crate::otanb::FakeBootloader;
-use crate::redact::redact_line;
+use crate::redact::{Direction, log_line, redact_line};
 
 /// Events that go nowhere.
 pub struct NoEvents;
@@ -216,7 +216,7 @@ impl FakeLink {
     fn deliver(&self, replies: Vec<String>, resets: bool) {
         let events = self.events();
         for r in replies {
-            events.log(&format!("<< {}", redact_line(&r, &[])));
+            events.log(&log_line(Direction::Received, &r));
             self.taps.feed(&r);
         }
         if resets {
@@ -226,15 +226,14 @@ impl FakeLink {
 
     /// Sends `line`; the log and [`FakeLink::sent`] get `echo` with its passwords masked, as the real link logs it.
     fn write(&self, line: &str, echo: &str) -> bool {
-        let echo = redact_line(echo, &[]);
         {
             let mut s = lock(&self.state);
             if s.connected.is_none() {
                 return false;
             }
-            s.sent.push(echo.to_string());
+            s.sent.push(redact_line(echo, &[]).into_owned());
         }
-        self.events().log(&format!(">> {echo}"));
+        self.events().log(&log_line(Direction::Sent, echo));
         let (replies, resets) = self.answer(line);
         let late = lock(&self.state).late.get(line.trim_end_matches(['\r', '\n'])).cloned();
         if let Some((after, lines)) = late {
@@ -246,7 +245,7 @@ impl FakeLink {
                     let _ = earlier.join();
                 }
                 for l in lines {
-                    events.log(&format!("<< {}", redact_line(&l, &[])));
+                    events.log(&log_line(Direction::Received, &l));
                     taps.feed(&l);
                 }
             });

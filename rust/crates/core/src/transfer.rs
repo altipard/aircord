@@ -700,7 +700,7 @@ mod tests {
     }
 
     /// Covers what this module sends and returns. The reply lines of the read-back are logged by the link itself
-    /// (`<< AT+PWORD=…` in clear on an S31-NB); masking those needs the logging side to call [`redact::redact_line`].
+    /// (`<< AT+PWORD=…` in clear on an S31-NB), masked by [`redact::log_line`], which has its own test.
     #[test]
     fn a_transfer_never_sends_or_reports_a_password_in_clear() {
         let link = device();

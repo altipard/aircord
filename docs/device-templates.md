@@ -247,7 +247,8 @@ settings of `type = "secret"`. Some firmware prints `AT+PWORD` in clear in
 
 - The link masks the fixed keys in every line it logs, sent (`>> `) and
   received (`<< `), so the terminal and a saved transcript show
-  `AT+PWORD=******`. Reply lines reach the core unmasked, because verifying a
+  `AT+PWORD=******`. The BLE link and the test fake both log through
+  `redact::log_line`. Reply lines reach the core unmasked, because verifying a
   change needs the value.
 - A transfer sends secrets through `Link::send_secret`, and no change, result or
   `{:?}` output carries their value; the read-back masks the template's own
