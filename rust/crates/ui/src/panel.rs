@@ -14,7 +14,14 @@ impl App {
     /// On connect: a loaded session's template wins, else the first that fits the name.
     pub(crate) fn apply_template_for(&mut self, device_name: &str) {
         let want = self.want_template.take().filter(|t| self.stores.templates.get(t).is_some());
+        self.template_fixed = want.is_some();
         let name = want.or_else(|| self.stores.templates.suggest(device_name).map(|t| t.name.clone()));
+        self.set_template(name);
+    }
+
+    /// A template picked by hand in the panel. It stays until the device is let go of.
+    pub(crate) fn pick_template(&mut self, name: Option<String>) {
+        self.template_fixed = true;
         self.set_template(name);
     }
 
@@ -83,7 +90,7 @@ impl App {
                 });
         });
         if let Some(p) = pick {
-            self.set_template(p);
+            self.pick_template(p);
         }
         ui.add_space(10.0);
 

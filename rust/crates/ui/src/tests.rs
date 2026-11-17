@@ -678,6 +678,39 @@ fn a_secret_of_a_template_found_by_the_model_is_masked_from_its_first_line() {
     assert!(has(&w, "Zugangsschlüssel") && !has_part(&w, "tok-abc"));
 }
 
+#[test]
+fn a_template_picked_by_hand_survives_the_next_read() {
+    // The name says nothing; the model says S31.
+    let link = FakeLink::configured("aa", "Sensor 7", S31_CFG);
+    link.reply("AT+FW", &["X1-NB firmware v1.4.2", "OK"]);
+    let mut w = world_with(link, &[("x1.toml", X1)]);
+    connected(&mut w, "Sensor 7");
+    assert_eq!(w.h.state().template.as_deref(), Some("Dragino S31-NB"), "nobody chose: the model decides");
+    w.h.state_mut().pick_template(Some("Prüfgerät X1".into()));
+    run(&mut w.h);
+    press(&mut w.h, "Read: Firmware");
+    wait(&mut w.h, "the value", |a| a.values.values().any(|v| v == "1.4.2"));
+    w.h.state_mut().read_again();
+    let link = Arc::clone(&w.link);
+    wait(&mut w.h, "the second read", |a| a.guided.read == Read::Ready && link.sent().iter().filter(|c| *c == "AT+CFG").count() == 2);
+    let app = w.h.state();
+    assert_eq!(app.template.as_deref(), Some("Prüfgerät X1"), "the model does not take the panel back");
+    assert!(app.values.values().any(|v| v == "1.4.2"), "and what the panel read stays");
+    assert_eq!(app.guided.form.as_ref().map(|f| f.template.name.as_str()), Some("Dragino S31-NB"), "the form is the model's");
+    assert!(!logged(app, S31_PASSWORD), "the model's secrets stay masked under another template");
+}
+
+#[test]
+fn a_session_s_template_is_not_replaced_by_the_model_s() {
+    let mut w = world_with(FakeLink::configured("aa", "Sensor 7", S31_CFG), &[("x1.toml", X1)]);
+    w.h.state_mut().want_template = Some("Prüfgerät X1".into());
+    connected(&mut w, "Sensor 7");
+    let app = w.h.state();
+    assert_eq!(app.template.as_deref(), Some("Prüfgerät X1"));
+    assert_eq!(app.guided.form.as_ref().map(|f| f.template.name.as_str()), Some("Dragino S31-NB"));
+    assert!(!logged(app, S31_PASSWORD));
+}
+
 /// A device that takes its time with the dump, so the read after a connect is still under way.
 fn slow() -> FakeLink {
     let link = FakeLink::console("aa", "Sensor 7");

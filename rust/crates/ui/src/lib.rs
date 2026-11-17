@@ -212,6 +212,10 @@ pub struct App {
     /// A loaded session's target and template, made real once a scan finds the device and a connect happens.
     pub want_addr: Option<String>,
     pub want_template: Option<String>,
+    /// The template was chosen by hand or by a loaded session: the device's model no longer changes it.
+    pub(crate) template_fixed: bool,
+    /// The template the device's model points to. Its secrets are masked even while another template is shown.
+    pub(crate) model_template: Option<String>,
     pub pin: String,
 
     // the link and the console
@@ -269,6 +273,8 @@ impl App {
             selected: None,
             want_addr: None,
             want_template: None,
+            template_fixed: false,
+            model_template: None,
             pin: String::new(),
             conn: Conn::Idle,
             log: VecDeque::new(),
@@ -327,16 +333,37 @@ impl App {
     /// Makes `name` the template shown. Its secrets are masked from here on, and in what the terminal already holds:
     /// the lines that named the model came before the template was known.
     pub(crate) fn set_template(&mut self, name: Option<String>) {
-        let secrets: Vec<String> = name
-            .as_ref()
-            .and_then(|n| self.stores.templates.get(n))
-            .map(|t| t.secret_keys().into_iter().filter(|k| !redact::is_always_secret(k)).map(str::to_string).collect())
-            .unwrap_or_default();
         self.template = name;
         self.values.clear();
         self.inputs.clear();
         if matches!(self.capture, Some(Capture { target: CaptureFor::Action(_), .. })) {
             self.capture = None;
+        }
+        self.refresh_secrets();
+    }
+
+    /// The device named its model. The template follows it unless a person or a session chose one: then only the
+    /// masking follows, since the device's secrets are those of its model whatever the panel shows.
+    pub(crate) fn model_known(&mut self, model: &str) {
+        let by_model = self.stores.templates.for_model(model).map(|t| t.name.clone());
+        self.model_template.clone_from(&by_model);
+        if by_model.is_some() && by_model != self.template && !self.template_fixed {
+            self.set_template(by_model);
+        } else {
+            self.refresh_secrets();
+        }
+    }
+
+    /// The keys to mask: the secrets of the template shown and of the one the model points to.
+    fn refresh_secrets(&mut self) {
+        let mut secrets: Vec<String> = Vec::new();
+        for name in [&self.template, &self.model_template].into_iter().flatten() {
+            let Some(t) = self.stores.templates.get(name) else { continue };
+            for key in t.secret_keys() {
+                if !redact::is_always_secret(key) && !secrets.iter().any(|s| s == key) {
+                    secrets.push(key.to_string());
+                }
+            }
         }
         if secrets != self.secrets {
             self.secrets = secrets;
@@ -658,6 +685,8 @@ impl App {
         if matches!(self.transfer, Some(xfer::Transfer { stage: xfer::Stage::Review, .. })) {
             self.transfer = None;
         }
+        self.template_fixed = false;
+        self.model_template = None;
         self.set_template(None);
         self.capture = None;
         self.picker = None;

@@ -419,9 +419,8 @@ impl App {
             }
         };
         // The model beats the advertised name, which for an NB node is its IMEI.
-        let by_model = cfg.model_line().and_then(|m| self.stores.templates.for_model(m)).map(|t| t.name.clone());
-        if by_model.is_some() && by_model != self.template {
-            self.set_template(by_model);
+        if let Some(model) = cfg.model_line().map(str::to_string) {
+            self.model_known(&model);
         }
         let template = self.stores.templates.select(cfg.model_line(), &name).filter(|t| !t.settings.is_empty()).cloned();
         let what = cfg.model_line().unwrap_or_default().to_string();
@@ -483,9 +482,8 @@ impl App {
     /// dump are masked before they reach the terminal.
     pub(crate) fn on_model_line(&mut self, reply: &str) {
         let Some(model) = reply.trim().strip_prefix("AT+MODEL=") else { return };
-        let by_model = self.stores.templates.for_model(model.trim()).map(|t| t.name.clone());
-        if self.connected() && by_model.is_some() && by_model != self.template {
-            self.set_template(by_model);
+        if self.connected() {
+            self.model_known(model.trim());
         }
     }
 
