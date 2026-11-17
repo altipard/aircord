@@ -164,12 +164,15 @@ release:
   release:
     tag_name: $CI_COMMIT_TAG
     name: "Aircord $CI_COMMIT_TAG"
+    # Only the Linux package is guaranteed: macOS and Windows are manual jobs
+    # the release does not wait for, so they get no links that could 404.
     description: |
-      Packages for this release are in the
-      [package registry]($CI_PROJECT_URL/-/packages).
+      The Linux package (amd64, .tar.xz) is linked below. macOS and Windows
+      packages are built by manual pipeline jobs; once those have run, they
+      are in the [package registry]($CI_PROJECT_URL/-/packages) under this tag.
 
       The macOS app is unsigned — right-click → *Open* on first launch.
-      Linux and Windows builds are provided but their runtime is unverified.
+      The runtime of the Linux and Windows builds is unverified.
     assets:
       links:
         - name: "Linux (amd64, .tar.xz)"
