@@ -1,0 +1,17 @@
+[package]
+name = "aircord"
+description = "Aircord desktop app: the serial console for devices that no longer have a serial port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aircord-core = { workspace = true }
+aircord-ble = { workspace = true }
+aircord-ui = { workspace = true }
+eframe = { workspace = true }

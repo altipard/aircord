@@ -1,0 +1,18 @@
+[package]
+name = "aircord-ble"
+description = "Aircord's radio: the Link over btleplug (CoreBluetooth, BlueZ, WinRT) on a tokio runtime of its own"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aircord-core = { workspace = true }
+btleplug = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+uuid = { workspace = true }

@@ -1,0 +1,28 @@
+[package]
+name = "aircord-ui"
+description = "Aircord's desktop window in egui, in BIMCraft's look: a thin shell over aircord-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aircord-core = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+rfd = { workspace = true }
+pollster = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+aircord-core = { workspace = true, features = ["testing"] }
+egui_kittest = { workspace = true }
+tempfile = { workspace = true }
+
+[features]
+# Renders the window to PNGs in tests (`cargo test -p aircord-ui --features screenshot -- --ignored screenshot`).
+screenshot = ["egui_kittest/wgpu", "egui_kittest/snapshot"]
