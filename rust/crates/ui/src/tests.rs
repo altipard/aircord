@@ -719,6 +719,16 @@ fn a_restart_without_a_link_says_so_and_sends_nothing() {
 }
 
 #[test]
+fn a_bare_ok_instead_of_settings_asks_for_the_password_too() {
+    // Answers every command with OK and prints no settings, as a locked console does.
+    let mut w = lay(FakeLink::console("aa", "Sensor 7"), &[]);
+    lay_connected(&mut w, "Sensor 7");
+    assert!(matches!(w.h.state().guided.read, Read::Failed(_)));
+    assert!(has(&w, "Passwort: Eingabe") && has_part(&w, "Etikett"));
+    assert!(!has_part(&w, "AT+"), "no command names in the lay view");
+}
+
+#[test]
 fn a_password_sent_by_the_connect_and_not_taken_is_said_to_be_wrong() {
     let link = FakeLink::console("aa", "Sensor 7");
     link.reply("AT+CFG", &[]);
@@ -731,7 +741,7 @@ fn a_password_sent_by_the_connect_and_not_taken_is_said_to_be_wrong() {
 
 #[test]
 fn an_answer_that_is_no_settings_does_not_ask_for_the_password() {
-    for reply in [&["AT_ERROR"][..], &["AT+TDC=900", "OK"], &["OK"]] {
+    for reply in [&["AT_ERROR"][..], &["AT+TDC=900", "OK"]] {
         let link = FakeLink::console("aa", "Sensor 7");
         link.reply("AT+CFG", reply);
         let mut w = lay(link, &[]);

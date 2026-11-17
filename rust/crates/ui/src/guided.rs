@@ -212,8 +212,10 @@ pub(crate) fn read_settings(link: &dyn Link, pin: Option<&str>, wait: Duration, 
 pub(crate) enum Failure {
     /// The device stayed silent or stopped mid-dump: what a device does that waits for its password.
     Timeout,
+    /// It took the question and printed nothing: a locked console answers `OK` and keeps its settings back.
+    Empty,
     Refused,
-    /// It answered, but with nothing the form can use.
+    /// It printed settings, but none that name the model.
     Unusable,
     Lost,
     Stopped,
@@ -228,7 +230,9 @@ impl Failure {
             Failure::Timeout
         } else if why.contains("abgelehnt") {
             Failure::Refused
-        } else if why.contains("keine Einstellungen") || why.contains("kein Gerätemodell") {
+        } else if why.contains("keine Einstellungen") {
+            Failure::Empty
+        } else if why.contains("kein Gerätemodell") {
             Failure::Unusable
         } else if why.contains("Verbindung") {
             Failure::Lost
@@ -243,6 +247,7 @@ impl Failure {
     pub(crate) fn text(self) -> &'static str {
         match self {
             Failure::Timeout => "Das Gerät hat nicht vollständig geantwortet. Bitte erneut versuchen.",
+            Failure::Empty => "Das Gerät hat keine Einstellungen gemeldet.",
             Failure::Refused => "Das Gerät hat die Abfrage abgelehnt. Bitte erneut versuchen.",
             Failure::Unusable => "Das Gerät hat keine verwertbaren Einstellungen gemeldet.",
             Failure::Lost => "Die Verbindung zum Gerät ist abgebrochen. Bitte neu verbinden.",
@@ -502,11 +507,13 @@ impl App {
         (left > 0.0).then_some(left)
     }
 
-    /// Whether to ask for the device's password: it stayed silent when asked for its settings and never said the
-    /// password was right. A device does not announce that it wants one, so this is the one place that decides. A
-    /// refusal or a dump without a model is an answer, and a password would not change it.
+    /// Whether to ask for the device's password: asked for its settings it stayed silent or printed none, and it
+    /// never said the password was right. A device does not announce that it wants one, so this is the one place
+    /// that decides, and it leans towards asking: without the field a lay person is stuck. A refusal or a dump
+    /// without a model is an answer, and a password would not change it.
     pub(crate) fn wants_password(&self) -> bool {
-        matches!(&self.guided.read, Read::Failed(why) if Failure::of(why) == Failure::Timeout) && !self.guided.status.boot.password_ok
+        let locked = matches!(&self.guided.read, Read::Failed(why) if matches!(Failure::of(why), Failure::Timeout | Failure::Empty));
+        locked && !self.guided.status.boot.password_ok
     }
 
     /// The settings arrived, or did not.
@@ -939,7 +946,7 @@ mod tests {
         let cases = [
             ("Keine vollständige Antwort auf AT+CFG.", Failure::Timeout),
             ("Das Gerät hat AT+CFG abgelehnt (AT_ERROR).", Failure::Refused),
-            ("AT+CFG hat keine Einstellungen geliefert.", Failure::Unusable),
+            ("AT+CFG hat keine Einstellungen geliefert.", Failure::Empty),
             ("AT+CFG nennt kein Gerätemodell (AT+MODEL fehlt).", Failure::Unusable),
             ("Verbindung verloren.", Failure::Lost),
             ("Keine Verbindung zum Gerät.", Failure::Lost),
