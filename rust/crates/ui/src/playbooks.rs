@@ -101,6 +101,11 @@ impl App {
             self.alert.warn("a playbook is already running");
             return;
         }
+        if self.transfer_running() {
+            self.alert.warn("settings are being transferred — wait for the result");
+            return;
+        }
+        self.interrupt_read();
         if pb.steps.is_empty() {
             self.alert.warn("playbook has no steps");
             return;

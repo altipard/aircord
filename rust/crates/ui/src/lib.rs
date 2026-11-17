@@ -19,7 +19,7 @@ use aircord_core::link::{Device, Link};
 use aircord_core::playbook::{self, Playbooks};
 use aircord_core::scan::{Column, Sort};
 use aircord_core::session::Sessions;
-use aircord_core::{config, filter, ota};
+use aircord_core::{config, filter, ota, redact};
 use egui::{
     Align, Align2, CentralPanel, Color32, Context, FontId, Frame, Id, Key, Layout, Margin, Modifiers, Panel, Rect, RichText, ScrollArea,
     Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, WidgetType, vec2,
@@ -28,6 +28,8 @@ use egui::{
 mod confirm;
 pub mod dialog;
 mod firmware;
+mod form;
+mod guided;
 pub mod icons;
 pub mod inbox;
 mod panel;
@@ -35,6 +37,7 @@ mod playbooks;
 mod sessions;
 pub mod style;
 mod widgets;
+mod xfer;
 
 #[cfg(test)]
 mod tests;
@@ -92,11 +95,30 @@ pub struct Timing {
     pub settle: Duration,
     /// For a playbook step's reply, and a read action's value.
     pub reply_wait: Duration,
+    /// For each reply while the settings are read or transferred.
+    pub read_wait: Duration,
+    /// How long a device may report no network before the guided view says what usually helps.
+    pub no_network_hint: Duration,
     pub ota: ota::Timing,
 }
 
 impl Timing {
-    pub const REAL: Timing = Timing { settle: Duration::from_secs(4), reply_wait: playbook::WAIT_TIMEOUT, ota: ota::Timing::REAL };
+    pub const REAL: Timing = Timing {
+        settle: Duration::from_secs(4),
+        reply_wait: playbook::WAIT_TIMEOUT,
+        read_wait: Duration::from_secs(5),
+        no_network_hint: Duration::from_secs(180),
+        ota: ota::Timing::REAL,
+    };
+}
+
+/// Which of the two faces the window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    /// Settings as a form, for people who do not know AT commands.
+    Guided,
+    /// The terminal, the control panel, playbooks, sessions and firmware.
+    Expert,
 }
 
 /// The selected device.
@@ -166,6 +188,19 @@ pub struct App {
     pub timing: Timing,
     styled: bool,
     now: f64,
+    pub view: View,
+
+    // the guided view
+    pub(crate) guided: guided::Guided,
+    pub(crate) transfer: Option<xfer::Transfer>,
+    /// Counts the connects, so settings read for an earlier link are dropped.
+    pub(crate) epoch: u64,
+    /// Stops the reading of settings when the link goes.
+    pub(crate) read_stop: Arc<AtomicBool>,
+    /// Counts the links: a connect's thread that wakes after its link was replaced sends nothing to the new one.
+    link_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// A restart was sent: the link going down is expected.
+    pub(crate) restarting: bool,
 
     // discovery
     pub display: Vec<Device>,
@@ -177,6 +212,10 @@ pub struct App {
     /// A loaded session's target and template, made real once a scan finds the device and a connect happens.
     pub want_addr: Option<String>,
     pub want_template: Option<String>,
+    /// The template was chosen by hand or by a loaded session: the device's model no longer changes it.
+    pub(crate) template_fixed: bool,
+    /// The template the device's model points to. Its secrets are masked even while another template is shown.
+    pub(crate) model_template: Option<String>,
     pub pin: String,
 
     // the link and the console
@@ -191,6 +230,8 @@ pub struct App {
 
     // the control panel
     pub template: Option<String>,
+    /// The active template's secret keys beyond the always-secret ones: what [`App::log_line`] masks on top.
+    secrets: Vec<String>,
     inputs: BTreeMap<usize, String>,
     pub(crate) values: BTreeMap<usize, String>,
     pub(crate) capture: Option<Capture>,
@@ -217,6 +258,13 @@ impl App {
             timing: Timing::REAL,
             styled: false,
             now: 0.0,
+            view: View::Guided,
+            guided: guided::Guided::default(),
+            transfer: None,
+            epoch: 0,
+            read_stop: Arc::new(AtomicBool::new(false)),
+            link_gen: Arc::default(),
+            restarting: false,
             display: Vec::new(),
             total: 0,
             filter: String::new(),
@@ -225,6 +273,8 @@ impl App {
             selected: None,
             want_addr: None,
             want_template: None,
+            template_fixed: false,
+            model_template: None,
             pin: String::new(),
             conn: Conn::Idle,
             log: VecDeque::new(),
@@ -235,6 +285,7 @@ impl App {
             status: "idle".into(),
             alert: Alert::default(),
             template: None,
+            secrets: Vec::new(),
             inputs: BTreeMap::new(),
             values: BTreeMap::new(),
             capture: None,
@@ -262,12 +313,71 @@ impl App {
 
     // ---------- the terminal's record ----------
 
-    /// A timestamped line in the terminal.
+    /// A timestamped line in the terminal, its passwords masked: the fixed ones and the active template's secrets. The
+    /// terminal is what Copy and Save hand out, so nothing gets into it in clear.
     pub fn log_line(&mut self, text: impl Into<String>) {
         let time = chrono::Local::now().format("%H:%M:%S").to_string();
-        self.log.push_back(LogLine { time, text: text.into() });
+        let text = self.masked(&text.into());
+        self.log.push_back(LogLine { time, text });
         while self.log.len() > MAX_LOG_LINES {
             self.log.pop_front();
+        }
+    }
+
+    /// `line` with every `AT+<secret>=` value in it masked.
+    fn masked(&self, line: &str) -> String {
+        let extra: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
+        redact::redact_line(line, &extra).into_owned()
+    }
+
+    /// Makes `name` the template shown. Its secrets are masked from here on, and in what the terminal already holds:
+    /// the lines that named the model came before the template was known.
+    pub(crate) fn set_template(&mut self, name: Option<String>) {
+        self.template = name;
+        self.values.clear();
+        self.inputs.clear();
+        if matches!(self.capture, Some(Capture { target: CaptureFor::Action(_), .. })) {
+            self.capture = None;
+        }
+        self.refresh_secrets();
+    }
+
+    /// The device named its model. The template follows it unless a person or a session chose one: then only the
+    /// masking follows, since the device's secrets are those of its model whatever the panel shows.
+    pub(crate) fn model_known(&mut self, model: &str) {
+        let by_model = self.stores.templates.for_model(model).map(|t| t.name.clone());
+        self.model_template.clone_from(&by_model);
+        if by_model.is_some() && by_model != self.template && !self.template_fixed {
+            self.set_template(by_model);
+        } else {
+            self.refresh_secrets();
+        }
+    }
+
+    /// The keys to mask: the secrets of the template shown and of the one the model points to.
+    fn refresh_secrets(&mut self) {
+        let mut secrets: Vec<String> = Vec::new();
+        for name in [&self.template, &self.model_template].into_iter().flatten() {
+            let Some(t) = self.stores.templates.get(name) else { continue };
+            for key in t.secret_keys() {
+                if !redact::is_always_secret(key) && !secrets.iter().any(|s| s == key) {
+                    secrets.push(key.to_string());
+                }
+            }
+        }
+        if secrets != self.secrets {
+            self.secrets = secrets;
+            if !self.secrets.is_empty() {
+                // Only a line with a command in it can hold a value to mask; the rest of a long log is left alone.
+                // Commands are typed in either case.
+                let has_command = |text: &str| text.as_bytes().windows(3).any(|w| w.eq_ignore_ascii_case(b"AT+"));
+                let lines: Vec<Option<String>> = self.log.iter().map(|l| has_command(&l.text).then(|| self.masked(&l.text))).collect();
+                for (line, text) in self.log.iter_mut().zip(lines) {
+                    if let Some(text) = text {
+                        line.text = text;
+                    }
+                }
+            }
         }
     }
 
@@ -279,13 +389,15 @@ impl App {
     /// An error on the alert line, and in the terminal, which is the durable record: an alert can be superseded, the
     /// log scrolled back through and saved.
     pub fn fail(&mut self, msg: impl Into<String>) {
-        let msg = msg.into();
+        let msg = self.masked(&msg.into());
         self.log_line(format!("!! {msg}"));
         self.alert.fail(msg);
     }
 
+    /// The status line names the command a playbook is at, so it is masked like the terminal: the window gets
+    /// screen-shared and photographed.
     fn set_status(&mut self, s: impl Into<String>) {
-        self.status = s.into();
+        self.status = self.masked(&s.into());
     }
 
     fn connected(&self) -> bool {
@@ -315,6 +427,12 @@ impl App {
         self.tick(&ctx);
 
         Panel::top("titlebar").frame(widgets::chrome(Margin::symmetric(12, 5))).show(ui, |ui| self.title_bar(ui));
+        if self.view == View::Guided {
+            self.guided_view(ui);
+            self.transfer_window(&ctx);
+            self.confirm_window(&ctx);
+            return;
+        }
         Panel::top("options").frame(widgets::chrome(Margin::symmetric(12, 6))).show(ui, |ui| self.options_bar(ui));
         Panel::bottom("status").frame(widgets::chrome(Margin::symmetric(12, 3))).show(ui, |ui| self.status_bar(ui));
         Panel::left("rail")
@@ -385,19 +503,35 @@ impl App {
             Msg::Log(line) => {
                 if let Some(reply) = line.strip_prefix("<< ") {
                     self.try_capture(reply);
+                    self.feed_status(reply);
+                    self.on_model_line(reply);
                 }
                 self.log_line(line);
             }
             Msg::LinkDropped => {
                 self.log_line("-- link dropped (device reset or out of range) — reconnect --");
                 self.set_disconnected("link dropped — reconnect");
+                if std::mem::take(&mut self.restarting) {
+                    self.guided.notice.ok("Das Gerät startet neu. In etwa einer Minute lässt es sich wieder verbinden.");
+                } else {
+                    self.guided.notice.warn("Die Verbindung zum Gerät ist abgebrochen. Bitte neu verbinden.");
+                }
             }
-            Msg::ScanFailed(e) => self.fail(e),
+            Msg::ScanFailed(e) => {
+                self.guided.notice.fail("Die Suche ist fehlgeschlagen. Ist Bluetooth eingeschaltet und für Aircord erlaubt?");
+                self.fail(e);
+            }
+            Msg::Cfg { epoch, result } => self.on_cfg(epoch, result),
+            Msg::Transfer(p) => self.on_transfer(p),
+            Msg::TransferDone(outcome) => self.on_transfer_done(outcome),
             Msg::Connected { name, addr, profile } => {
                 self.log_line(format!("-- connected via {profile} UART profile, ready --"));
                 self.set_connected(name, addr, profile);
             }
-            Msg::ConnectFailed => self.conn = Conn::Idle,
+            Msg::ConnectFailed => {
+                self.conn = Conn::Idle;
+                self.guided.notice.fail("Die Verbindung ist nicht zustande gekommen. Ist das Gerät eingeschaltet und in der Nähe?");
+            }
             Msg::Status(s) => self.set_status(s),
             Msg::Playbook(playbook::Report::Step { n, total, cmd }) => {
                 let name = self.running.as_ref().map(|r| r.0.clone()).unwrap_or_default();
@@ -495,7 +629,13 @@ impl App {
         self.stop_scan();
         self.conn = Conn::Connecting;
         self.set_status(format!("connecting to {}…", sel.name));
+        self.epoch += 1;
+        self.read_stop = Arc::new(AtomicBool::new(false));
+        self.restarting = false;
         let (link, out, pin, settle) = (Arc::clone(&self.link), self.outbox(), self.pin.trim().to_string(), self.timing.settle);
+        let (epoch, stop, read_wait) = (self.epoch, Arc::clone(&self.read_stop), self.timing.read_wait);
+        let generation = Arc::clone(&self.link_gen);
+        let mine = generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         std::thread::spawn(move || {
             out.log(format!("-- connecting to {} ({}) --", sel.name, sel.addr));
             let Some(profile) = link.connect(&sel.addr) else {
@@ -504,24 +644,41 @@ impl App {
             };
             let addr = link.current_addr().unwrap_or(sel.addr.clone());
             out.post(Msg::Connected { name: sel.name.clone(), addr, profile });
-            if pin.is_empty() {
+            // Four silent seconds after "connected" read as a hang: say what is happening.
+            let next = if pin.is_empty() { "reading the settings" } else { "sending PIN" };
+            out.post(Msg::Status(format!("connected: {} — settling, {next} in {}s", sel.name, settle.as_secs())));
+            out.log(format!("-- waiting {}s for the device to settle, then {next} --", settle.as_secs()));
+            std::thread::sleep(settle);
+            // Disconnected, and perhaps connected to another device meanwhile: this PIN is not for that one.
+            if generation.load(std::sync::atomic::Ordering::Relaxed) != mine {
                 return;
             }
-            // Four silent seconds after "connected" read as a hang: say what is happening.
-            out.post(Msg::Status(format!("connected: {} — settling, PIN in {}s", sel.name, settle.as_secs())));
-            out.log(format!("-- waiting {}s for the device to settle, then sending PIN --", settle.as_secs()));
-            std::thread::sleep(settle);
-            if link.is_connected() {
-                link.send_secret(&pin);
-                out.post(Msg::Status(format!("connected: {}", sel.name)));
-            } else {
-                out.log("-- PIN skipped: link dropped during init --");
+            if !link.is_connected() {
+                out.log("-- link dropped during init --");
+                return;
             }
+            // The PIN first, if there is one, then the settings: the guided view's form, and the model for the template.
+            let result = guided::read_settings(&*link, Some(pin.as_str()).filter(|p| !p.is_empty()), read_wait, &stop);
+            // The read can outlast the link: a status for a device already let go of would overwrite "disconnected",
+            // or name the wrong device once another one is connected. A link that just went ends the read at once,
+            // before the window has counted on, so the link is asked too.
+            if generation.load(std::sync::atomic::Ordering::Relaxed) != mine || !link.is_connected() {
+                return;
+            }
+            out.post(Msg::Status(format!("connected: {}", sel.name)));
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            out.post(Msg::Cfg { epoch, result });
         });
     }
 
     pub fn disconnect(&mut self) {
+        // Counted on before the link goes: the connect's thread wakes the moment it does.
+        let was = self.link_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if !self.link.disconnect() {
+            // Nothing was let go of: the thread, if there is one, is still this link's.
+            self.link_gen.store(was, std::sync::atomic::Ordering::Relaxed);
             return;
         }
         self.log_line("-- disconnected --");
@@ -532,20 +689,32 @@ impl App {
         self.history = self.stores.history.get(&addr);
         self.set_status(format!("connected: {name}"));
         self.apply_template_for(&name);
+        self.guided_reset(guided::Read::Reading);
+        // The connect sends the PIN that is typed in: if the settings stay away after it, it was not taken.
+        self.guided.password_tried = !self.pin.trim().is_empty();
         self.conn = Conn::Connected { name, addr, profile };
         self.focus_cmd = true;
     }
 
     fn set_disconnected(&mut self, status: &str) {
         self.conn = Conn::Idle;
-        self.template = None;
+        self.link_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.read_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.guided_reset(guided::Read::Idle);
+        if matches!(self.transfer, Some(xfer::Transfer { stage: xfer::Stage::Review, .. })) {
+            self.transfer = None;
+        }
+        self.template_fixed = false;
+        self.model_template = None;
+        self.set_template(None);
         self.capture = None;
         self.picker = None;
         self.set_status(status);
     }
 
     /// Sends an AT command and keeps it in the device's history. The command line and the control panel both send
-    /// through here.
+    /// through here. A command that sets a password is sent but not kept: the history is a file on disk, and a masked
+    /// entry would send the mask as the new password when run again.
     pub fn send_cmd(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         if cmd.is_empty() {
@@ -553,6 +722,13 @@ impl App {
         }
         if !self.connected() || !self.link.is_connected() {
             self.alert.warn("not connected — connect to a device first");
+            return;
+        }
+        // The settings being read by themselves give way: the reply would end up in the dump, or the dump in the reply.
+        self.interrupt_read();
+        let extra: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
+        if redact::is_secret_command(cmd, &extra) {
+            self.link.send(cmd);
             return;
         }
         if let Some(addr) = self.link.current_addr()
@@ -610,6 +786,19 @@ impl App {
         ui.horizontal(|ui| {
             ui.set_min_height(26.0);
             widgets::brand(ui);
+            ui.add_space(10.0);
+            if widgets::tab(ui, "Einstellungen", self.view == View::Guided)
+                .on_hover_text("Das Gerät über ein Formular einstellen")
+                .clicked()
+            {
+                self.set_view(View::Guided);
+            }
+            if widgets::tab(ui, "Experte", self.view == View::Expert)
+                .on_hover_text("Terminal, Bedienfeld, Playbooks, Sessions und Firmware")
+                .clicked()
+            {
+                self.set_view(View::Expert);
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (icon, label) = if style::dark() { (Icon::Sun, "Light theme") } else { (Icon::Moon, "Dark theme") };
                 if icon_button(ui, icon, label).clicked() {

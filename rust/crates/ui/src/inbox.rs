@@ -5,8 +5,9 @@
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use aircord_core::cfg::Cfg;
 use aircord_core::link::Events;
-use aircord_core::{ota, playbook};
+use aircord_core::{ota, playbook, transfer};
 use egui::Context;
 
 /// One thing that happened.
@@ -15,13 +16,27 @@ pub enum Msg {
     Log(String),
     LinkDropped,
     ScanFailed(String),
-    Connected { name: String, addr: String, profile: String },
+    Connected {
+        name: String,
+        addr: String,
+        profile: String,
+    },
     ConnectFailed,
     Status(String),
     Playbook(playbook::Report),
-    PlaybookDone { name: String, result: Result<(), String> },
+    PlaybookDone {
+        name: String,
+        result: Result<(), String>,
+    },
     Ota(ota::Report),
     OtaDone(Result<(), String>),
+    /// The settings read after connect number `epoch`, or why they could not be read.
+    Cfg {
+        epoch: u64,
+        result: Result<Cfg, String>,
+    },
+    Transfer(transfer::Progress),
+    TransferDone(transfer::Outcome),
 }
 
 /// The sending side, for the link and the jobs: it wakes the window for each message.

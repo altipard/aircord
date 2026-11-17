@@ -192,6 +192,11 @@ impl App {
             self.alert.warn("a firmware update is already running");
             return;
         }
+        if self.transfer_running() {
+            self.alert.warn("settings are being transferred — wait for the result");
+            return;
+        }
+        self.interrupt_read();
         self.alert.clear();
         let stop = Arc::new(AtomicBool::new(false));
         self.ota = Some(Run { phase: "starting…".into(), sent: 0, total: 0, done: None, stop: Arc::clone(&stop), hidden: false });

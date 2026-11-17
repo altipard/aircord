@@ -232,6 +232,101 @@ pub fn field(ui: &mut Ui, edit: TextEdit<'_>, icon: Option<Icon>, unit: Option<&
     r
 }
 
+/// A dropdown in the field's look: the chosen text and a chevron; a click opens `items` under it (build them with
+/// [`dropdown_item`]) and a click on one closes it. Named `"<name>: <text>"`, so a form's two dropdowns that both
+/// show "Aus" stay apart for screen readers and tests.
+pub fn dropdown(ui: &mut Ui, name: &str, text: &str, width: f32, items: impl FnOnce(&mut Ui)) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(width.max(80.0), CONTROL_H), Sense::click());
+    let enabled = ui.is_enabled();
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, enabled, format!("{name}: {text}")));
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&r));
+    let fill = if enabled && (r.hovered() || open) { pal().hover_fill } else { pal().field };
+    let ink = if enabled { pal().text } else { pal().disabled };
+    let p = ui.painter();
+    p.rect_filled(rect, RADIUS_SM, fill);
+    if r.has_focus() || open {
+        p.rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+    } else {
+        p.rect_stroke(rect, RADIUS_SM, Stroke::new(1.0, pal().field_border), StrokeKind::Inside);
+    }
+    let chevron = Rect::from_center_size(pos2(rect.right() - 14.0, rect.center().y), vec2(12.0, 12.0));
+    icons::paint(p, Icon::Chevron, chevron, if enabled { pal().muted } else { pal().disabled });
+    let galley = p.layout_no_wrap(text.to_string(), egui::FontId::proportional(12.5), ink);
+    let room = Rect::from_min_max(rect.min + vec2(10.0, 0.0), rect.max - vec2(26.0, 0.0));
+    p.with_clip_rect(room).galley_with_override_text_color(pos2(room.left(), rect.center().y - galley.size().y / 2.0), galley, ink);
+    egui::Popup::menu(&r).width(rect.width()).show(|ui| {
+        ui.set_min_width(rect.width() - 20.0);
+        ui.spacing_mut().item_spacing.y = 2.0;
+        items(ui);
+    });
+    r
+}
+
+/// One line of a [`dropdown`]; whether it was picked.
+pub fn dropdown_item(ui: &mut Ui, text: &str, selected: bool) -> bool {
+    let width = ui.available_width();
+    ui.add(egui::Button::selectable(selected, text).min_size(vec2(width, 24.0))).clicked()
+}
+
+/// A switch, named `"<name>: Ein"` or `"<name>: Aus"`; the caller flips the value on a click.
+pub fn switch(ui: &mut Ui, name: &str, on: bool) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(38.0, 22.0), Sense::click());
+    let enabled = ui.is_enabled();
+    let state = if on { "Ein" } else { "Aus" };
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, format!("{name}: {state}")));
+    let p = ui.painter();
+    let (track, knob) = match (enabled, on) {
+        (false, _) => (pal().field, pal().disabled),
+        (true, true) => (pal().accent, pal().card),
+        (true, false) => (pal().pressed, pal().icon),
+    };
+    if r.has_focus() {
+        p.rect_stroke(rect.expand(2.0), 13.0, Stroke::new(2.0, pal().accent), StrokeKind::Outside);
+    }
+    p.rect(rect, 11.0, track, Stroke::new(1.0, if on && enabled { pal().accent } else { pal().field_border }), StrokeKind::Inside);
+    let x = if on { rect.right() - 11.0 } else { rect.left() + 11.0 };
+    p.circle_filled(pos2(x, rect.center().y), 7.0, knob);
+    r
+}
+
+/// Signal strength as four bars, `level` of them filled: a number in dBm says nothing to most people.
+pub fn signal_bars(p: &egui::Painter, at: Rect, level: u8) {
+    for i in 0..4u8 {
+        let h = 4.0 + 3.0 * f32::from(i);
+        let x = at.left() + 5.0 * f32::from(i);
+        let bar = Rect::from_min_max(pos2(x, at.bottom() - h), pos2(x + 3.0, at.bottom()));
+        p.rect_filled(bar, 1.0, if i < level { pal().icon } else { pal().field_border });
+    }
+}
+
+/// How a line of a status or a result reads at a glance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    Ok,
+    Warn,
+    Refused,
+    /// Sent, but not confirmed.
+    Unsure,
+    /// Nothing known yet.
+    Idle,
+}
+
+/// A [`Mark`]'s drawing, 16 pt.
+pub fn mark(ui: &mut Ui, mark: Mark) {
+    let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+    let (icon, ink) = match mark {
+        Mark::Ok => (Icon::Check, pal().ok),
+        Mark::Warn => (Icon::Warning, pal().warn),
+        Mark::Refused => (Icon::Refused, pal().error),
+        Mark::Unsure => (Icon::Unsure, pal().warn),
+        Mark::Idle => {
+            ui.painter().circle_stroke(r.center(), 4.0, Stroke::new(1.5, pal().disabled));
+            return;
+        }
+    };
+    icons::paint(ui.painter(), icon, r, ink);
+}
+
 /// A hairline across the width.
 pub fn hairline(ui: &mut Ui) {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
