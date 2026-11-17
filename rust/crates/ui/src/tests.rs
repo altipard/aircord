@@ -984,7 +984,14 @@ fn screenshot() {
         wait(&mut h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
         shot(&mut h, "result");
         press(&mut h, "Später");
+        // The fold sits under the lay cards, out of a window this small: it is scrolled to before it can be pressed,
+        // and again once it is open, so the picture shows it with what it opened.
+        h.get_by_label("Weitere Einstellungen").scroll_to_me();
+        run(&mut h);
         press(&mut h, "Weitere Einstellungen");
+        assert!(h.state().guided.form.as_ref().unwrap().more);
+        h.get_by_label("Weitere Einstellungen").scroll_to_me();
+        run(&mut h);
         shot(&mut h, "more");
         press(&mut h, "Experte");
         shot(&mut h, "expert");
