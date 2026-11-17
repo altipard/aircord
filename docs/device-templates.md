@@ -45,8 +45,11 @@ You can always override the choice from the dropdown in the panel header.
 `model` is for selection once `AT+CFG` has been read: the core's
 `Templates::select` prefers the first template (in name order) whose `model`
 fits the `AT+MODEL` value and falls back to `match`, because the advertised name
-of a Dragino NB node is usually its IMEI and says nothing about the model. The
-window does not call it yet.
+of a Dragino NB node is usually its IMEI and says nothing about the model.
+After a connect Aircord reads `AT+CFG` by itself. The guided view then takes its
+settings form from `Templates::select`, among the templates that have
+settings. The control panel switches to the template whose `model` fits, unless
+its template was picked by hand or came from a loaded session.
 
 ## Action types
 
