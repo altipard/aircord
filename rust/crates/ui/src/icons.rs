@@ -1,6 +1,6 @@
 //! The icons: monochrome outlines on a 24 × 24 grid, one 1.5 pt pen at every size, no fills. The mechanism (and the
 //! Search, Close, Copy, Delete, Open, Save, Link and Check drawings) come from BIMCraft's `icons.rs`; the rest are
-//! Aircord's own in the same hand.
+//! Aircord's own in the same hand, the Sun and Moon of the theme switch after PhotoCraft's title bar.
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use std::f32::consts::TAU;
@@ -27,7 +27,8 @@ pub enum Icon {
     Edit,
     Import,
     Export,
-    Theme,
+    Sun,
+    Moon,
     History,
     Check,
     Warning,
@@ -53,7 +54,8 @@ impl Icon {
         Icon::Edit,
         Icon::Import,
         Icon::Export,
-        Icon::Theme,
+        Icon::Sun,
+        Icon::Moon,
         Icon::History,
         Icon::Check,
         Icon::Warning,
@@ -195,12 +197,19 @@ pub fn outlines(icon: Icon) -> Vec<Outline> {
             g.closed(&[(4.0, 20.0), (5.0, 15.5), (16.0, 4.5), (19.5, 8.0), (8.5, 19.0)]);
             g.line(&[(13.5, 7.0), (17.0, 10.5)]);
         }
-        Icon::Theme => {
-            g.circle((12.0, 12.0), 8.0);
-            g.line(&[(12.0, 4.0), (12.0, 20.0)]);
-            g.line(&[(12.0, 8.0), (18.5, 8.0)]);
-            g.line(&[(12.0, 12.0), (20.0, 12.0)]);
-            g.line(&[(12.0, 16.0), (18.5, 16.0)]);
+        Icon::Sun => {
+            // The theme switch in dark mode: back to light.
+            g.circle((12.0, 12.0), 4.0);
+            for k in 0..8 {
+                let a = k as f32 * TAU / 8.0;
+                let (s, c) = a.sin_cos();
+                g.line(&[(12.0 + 6.5 * c, 12.0 + 6.5 * s), (12.0 + 9.0 * c, 12.0 + 9.0 * s)]);
+            }
+        }
+        Icon::Moon => {
+            // The theme switch in light mode: a crescent, the outer circle cut by an inner one at its upper right.
+            g.arc((12.0, 12.0), 8.5, 10.4, 259.6);
+            g.arc((15.5, 8.5), 7.0, 224.0, 46.0);
         }
         Icon::History => {
             g.arc((12.0, 12.0), 8.5, -150.0, 180.0);

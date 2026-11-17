@@ -1,21 +1,29 @@
-//! Pieces every part of the window uses: the buttons (BIMCraft's drawn by hand, so they carry an icon and a focus
-//! ring), the alert strip, tabs.
+//! Pieces every part of the window uses, in PhotoCraft's hand: buttons drawn by hand (an icon, a focus ring, the dark
+//! primary), pill tabs, cards on the dock, quiet fields with an icon or a unit, the icon rail's buttons, hairlines, the
+//! alert strip. Each is named for screen readers and tests by its label. The shapes follow PhotoCraft's
+//! `crates/ui-egui/src/widgets.rs` (`pill_tab`, `card`, `button_impl`, `text_field`, `hairline`; MIT OR Apache-2.0).
 
-use egui::{Align2, Color32, CornerRadius, FontId, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType, vec2};
+use egui::{
+    Align, Color32, CornerRadius, Frame, Layout, Margin, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
+    WidgetInfo, WidgetType, pos2, vec2,
+};
 
 use crate::icons::{self, Icon};
-use crate::style::pal;
+use crate::style::{self, RADIUS, RADIUS_SM, pal};
 
 /// How a button stands out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
-    /// The usual flat tool button.
+    /// The usual quiet button: field fill, hairline border.
     Plain,
-    /// The one primary action of its area: accent fill.
+    /// The one primary action of its area: dark on light, light on dark.
     Primary,
     /// A destructive action: it reads as one before it is clicked, not only in the confirmation.
     Danger,
 }
+
+/// Height of a button and a field.
+pub const CONTROL_H: f32 = 28.0;
 
 /// A button with an icon before its label, named for screen readers and tests by the label.
 pub fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, tone: Tone) -> Response {
@@ -24,96 +32,210 @@ pub fn button(ui: &mut Ui, icon: Option<Icon>, label: &str, tone: Tone) -> Respo
 
 /// [`button`] whose accessible name says more than its short label: a panel's "Send" is "Send: Reboot device".
 pub fn button_named(ui: &mut Ui, icon: Option<Icon>, label: &str, name: &str, tone: Tone) -> Response {
-    let font = FontId::proportional(13.0);
-    let text_w = ui.painter().layout_no_wrap(label.to_string(), font.clone(), pal().text).size().x;
+    let galley = ui.painter().layout_no_wrap(label.to_string(), style::medium(12.5), pal().text);
     let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
-    let (rect, r) = ui.allocate_exact_size(vec2(text_w + icon_w + 20.0, 28.0), Sense::click());
+    let (rect, r) = ui.allocate_exact_size(vec2(galley.size().x + icon_w + 24.0, CONTROL_H), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, name));
     let hovered = r.hovered() && enabled;
     let pressed = r.is_pointer_button_down_on() && enabled;
+    let quiet = |rest: Color32| {
+        if pressed {
+            pal().pressed
+        } else if hovered {
+            pal().hover_fill
+        } else {
+            rest
+        }
+    };
     let (fill, stroke, ink) = match tone {
         Tone::Primary => {
             let fill = if pressed {
-                pal().accent.gamma_multiply(0.85)
+                pal().primary.gamma_multiply(0.85)
             } else if hovered {
-                pal().hover
+                pal().primary.gamma_multiply(0.93)
             } else {
-                pal().accent
+                pal().primary
             };
-            (fill, Stroke::NONE, Color32::WHITE)
+            (fill, Stroke::NONE, pal().primary_text)
         }
         Tone::Danger => {
-            let fill = if hovered { pal().error_fill } else { Color32::TRANSPARENT };
-            (fill, Stroke::new(1.0, pal().error.gamma_multiply(0.6)), pal().error)
+            let fill = if hovered && !pressed { pal().error_fill } else { quiet(pal().field) };
+            (fill, Stroke::new(1.0, pal().error.gamma_multiply(0.55)), pal().error)
         }
-        Tone::Plain => {
-            let (fill, stroke) = match (pressed, hovered) {
-                (true, _) => (pal().select_fill, Stroke::new(1.0, pal().accent)),
-                (false, true) => (pal().hover_fill, Stroke::new(1.0, pal().hover)),
-                (false, false) => (pal().bar, Stroke::new(1.0, pal().border)),
-            };
-            (fill, stroke, pal().text)
-        }
+        Tone::Plain => (quiet(pal().field), Stroke::new(1.0, pal().field_border), pal().text),
     };
-    // Disabled, every tone looks the same quiet way: a washed-out accent reads as broken, not as unavailable.
-    let (fill, stroke, ink) =
-        if enabled { (fill, stroke, ink) } else { (pal().bar, Stroke::new(1.0, pal().border), pal().muted.gamma_multiply(0.7)) };
-    let stroke = if r.has_focus() { Stroke::new(2.0, pal().accent) } else { stroke };
+    // Disabled, every tone looks the same quiet way: a washed-out primary reads as broken, not as unavailable.
+    let (fill, stroke, ink) = if enabled { (fill, stroke, ink) } else { (pal().field, Stroke::new(1.0, pal().separator), pal().faint) };
     let p = ui.painter();
-    p.rect(rect, 4.0, fill, stroke, StrokeKind::Inside);
-    let mut x = rect.left() + 10.0;
+    if r.has_focus() {
+        p.rect_stroke(rect.expand(2.0), RADIUS_SM + 2, Stroke::new(2.0, pal().accent), StrokeKind::Outside);
+    }
+    p.rect(rect, RADIUS_SM, fill, stroke, StrokeKind::Inside);
+    let mut x = rect.center().x - (galley.size().x + icon_w) / 2.0;
     if let Some(icon) = icon {
-        icons::paint(p, icon, Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0)), ink);
+        icons::paint(p, icon, Rect::from_center_size(pos2(x + 7.0, rect.center().y), vec2(15.0, 15.0)), ink);
         x += icon_w;
     }
-    p.text(egui::pos2(x, rect.center().y), Align2::LEFT_CENTER, label, font, ink);
+    p.galley_with_override_text_color(pos2(x, rect.center().y - galley.size().y / 2.0), galley, ink);
     r
 }
 
 /// A small square button: an icon alone, its name in its tooltip and for screen readers.
 pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
-    let (rect, r) = ui.allocate_exact_size(vec2(28.0, 26.0), Sense::click());
-    let enabled = ui.is_enabled();
-    r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
-    if r.hovered() && enabled {
-        ui.painter().rect_filled(rect, 4.0, pal().hover_fill);
-    }
-    if r.has_focus() {
-        ui.painter().rect_stroke(rect, 4.0, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
-    }
-    let ink = if enabled { pal().icon } else { pal().icon.gamma_multiply(0.35) };
-    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), vec2(17.0, 17.0)), ink);
-    r.on_hover_text(label)
+    icon_toggle(ui, icon, label, label, false, 28.0)
 }
 
-/// A tab (BIMCraft's): the open one sits on the surface it opens, the others are flat.
-pub fn tab(ui: &mut Ui, label: &str, active: bool) -> Response {
-    let font = FontId::proportional(13.0);
-    let size = ui.painter().layout_no_wrap(label.to_string(), font.clone(), pal().text).size();
-    let (rect, r) = ui.allocate_exact_size(size + vec2(24.0, 10.0), Sense::click());
-    r.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, active, label));
-    let (fill, ink) = match (active, r.hovered()) {
-        (true, _) => (pal().surface, pal().text),
-        (false, true) => (pal().hover_fill, pal().text),
-        (false, false) => (Color32::TRANSPARENT, pal().muted),
-    };
+/// An icon rail button: [`icon_button`], larger, with a tooltip of its own, tinted with the accent while what it opens
+/// is open (as PhotoCraft's tool rail marks the active tool).
+pub fn rail_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, active: bool) -> Response {
+    icon_toggle(ui, icon, label, tip, active, 34.0)
+}
+
+fn icon_toggle(ui: &mut Ui, icon: Icon, label: &str, tip: &str, active: bool, side: f32) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(side, side), Sense::click());
+    let enabled = ui.is_enabled();
+    r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     let p = ui.painter();
-    let radius = CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
-    p.rect(rect, radius, fill, if active { Stroke::new(1.0, pal().border) } else { Stroke::NONE }, StrokeKind::Inside);
     if active {
-        p.line_segment([rect.left_top() + vec2(2.0, 1.0), rect.right_top() + vec2(-2.0, 1.0)], Stroke::new(2.0, pal().accent));
+        p.rect(rect, RADIUS_SM, pal().select_fill, Stroke::new(1.0, pal().accent_border), StrokeKind::Inside);
+    } else if r.hovered() && enabled {
+        p.rect_filled(rect, RADIUS_SM, pal().hover_fill);
     }
     if r.has_focus() {
-        p.rect_stroke(rect, radius, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+        p.rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
     }
-    p.text(rect.center(), Align2::CENTER_CENTER, label, font, ink);
+    let ink = match (enabled, active) {
+        (false, _) => pal().faint.gamma_multiply(0.6),
+        (true, true) => pal().accent,
+        (true, false) => pal().icon,
+    };
+    let glyph = (side * 0.6).round();
+    icons::paint(p, icon, Rect::from_center_size(rect.center(), vec2(glyph, glyph)), ink);
+    r.on_hover_text(tip)
+}
+
+/// A pill tab (PhotoCraft's): the open one a raised grey pill with a hairline, the others flat and dimmer.
+pub fn tab(ui: &mut Ui, label: &str, active: bool) -> Response {
+    let galley = ui.painter().layout_no_wrap(label.to_string(), style::medium(12.5), pal().text);
+    let (rect, r) = ui.allocate_exact_size(vec2(galley.size().x + 20.0, 24.0), Sense::click());
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, active, label));
+    paint_pill(ui, rect, active, r.hovered());
+    if r.has_focus() {
+        ui.painter().rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+    }
+    let ink = if active { pal().text } else { pal().muted };
+    ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, ink);
     r
 }
 
-/// A section's title: small caps-like muted heading, as BIMCraft's palettes have.
+fn paint_pill(ui: &Ui, rect: Rect, active: bool, hovered: bool) {
+    let p = ui.painter();
+    if active {
+        p.rect(rect, RADIUS_SM, pal().hover_fill, Stroke::new(1.0, pal().field_border), StrokeKind::Inside);
+    } else if hovered {
+        p.rect_filled(rect, RADIUS_SM, pal().hover_fill.gamma_multiply(0.6));
+    }
+}
+
+/// A card's header: its title as the one open pill tab, in sentence case ("CONTROL PANEL" reads "Control panel").
+/// Painted, not a widget: the area it heads already says what it is.
 pub fn section(ui: &mut Ui, title: &str) {
-    ui.label(RichText::new(title).strong().size(12.0).color(pal().muted));
+    let title = sentence_case(title);
+    let galley = ui.painter().layout_no_wrap(title, style::medium(12.5), pal().text);
+    let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x + 20.0, 24.0), Sense::hover());
+    paint_pill(ui, rect, true, false);
+    ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, pal().text);
+}
+
+fn sentence_case(s: &str) -> String {
+    if s.chars().any(char::is_lowercase) {
+        return s.to_string();
+    }
+    let lower = s.to_lowercase();
+    let mut chars = lower.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// A card on the dock: the card fill, a hairline border, PhotoCraft's card radius and padding.
+pub fn card() -> Frame {
+    Frame::new().fill(pal().card).stroke(Stroke::new(1.0, pal().card_border)).corner_radius(RADIUS).inner_margin(Margin {
+        left: 8,
+        right: 8,
+        top: 6,
+        bottom: 10,
+    })
+}
+
+/// A quiet field: field fill, hairline border that takes the accent while typing, an optional icon before the text
+/// and a dimmed unit after it. The caller builds the edit (id, hint, font, password); the field draws its frame.
+pub fn field(ui: &mut Ui, edit: TextEdit<'_>, icon: Option<Icon>, unit: Option<&str>, width: f32) -> Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(width.max(48.0), CONTROL_H), Sense::hover());
+    let enabled = ui.is_enabled();
+    ui.painter().rect_filled(rect, RADIUS_SM, pal().field);
+    let mut inner = rect.shrink2(vec2(8.0, 2.0));
+    let ink = if enabled { pal().muted } else { pal().faint.gamma_multiply(0.6) };
+    if let Some(icon) = icon {
+        icons::paint(ui.painter(), icon, Rect::from_center_size(pos2(inner.left() + 7.0, rect.center().y), vec2(14.0, 14.0)), ink);
+        inner.min.x += 20.0;
+    }
+    if let Some(unit) = unit {
+        let g = ui.painter().layout_no_wrap(unit.to_string(), egui::FontId::proportional(11.5), ink);
+        inner.max.x -= g.size().x + 6.0;
+        ui.painter().galley(pos2(inner.right() + 6.0, rect.center().y - g.size().y / 2.0), g, ink);
+    }
+    let mut child = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
+    child.spacing_mut().interact_size.y = inner.height();
+    let r = child.add(edit.frame(Frame::NONE).desired_width(inner.width()).vertical_align(Align::Center));
+    let border = if r.has_focus() { pal().accent_border } else { pal().field_border };
+    ui.painter().rect_stroke(rect, RADIUS_SM, Stroke::new(1.0, border), StrokeKind::Inside);
+    r
+}
+
+/// A hairline across the width.
+pub fn hairline(ui: &mut Ui) {
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, pal().separator));
+}
+
+/// A vertical hairline in a row, `height` tall.
+pub fn vline(ui: &mut Ui, height: f32) {
+    let (r, _) = ui.allocate_exact_size(vec2(9.0, height), Sense::hover());
+    ui.painter().vline(r.center().x, r.y_range(), Stroke::new(1.0, pal().separator));
+}
+
+/// A chrome bar's frame (title bar, options bar, icon rail, status bar).
+pub fn chrome(margin: Margin) -> Frame {
+    Frame::new().fill(pal().chrome).inner_margin(margin)
+}
+
+/// The tab over the terminal, as PhotoCraft's document tab: a title and a dimmed detail on the card colour. Painted,
+/// not a widget, so its text never doubles a device's name for screen readers.
+pub fn doc_tab(ui: &mut Ui, title: &str, detail: &str) {
+    let t = ui.painter().layout_no_wrap(title.to_string(), style::medium(12.5), pal().text);
+    let d = ui.painter().layout_no_wrap(detail.to_string(), egui::FontId::proportional(11.0), pal().muted);
+    let gap = if detail.is_empty() { 0.0 } else { 8.0 };
+    let (rect, _) = ui.allocate_exact_size(vec2(t.size().x + gap + d.size().x + 22.0, 26.0), Sense::hover());
+    let p = ui.painter();
+    p.rect(rect, CornerRadius::same(RADIUS_SM), pal().card, Stroke::new(1.0, pal().card_border), StrokeKind::Inside);
+    let x = rect.left() + 11.0;
+    let tw = t.size().x;
+    p.galley_with_override_text_color(pos2(x, rect.center().y - t.size().y / 2.0), t, pal().text);
+    p.galley_with_override_text_color(pos2(x + tw + gap, rect.center().y - d.size().y / 2.0), d, pal().muted);
+}
+
+/// The brand in the title bar: the primary tile with the scan waves in it, and the name.
+pub fn brand(ui: &mut Ui) {
+    let (r, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+    ui.painter().rect_filled(r, 5.0, pal().primary);
+    icons::paint(ui.painter(), Icon::Scan, r.shrink(3.0), pal().primary_text);
+    ui.label(RichText::new("Aircord").font(style::semibold(13.0)).color(pal().text));
+}
+
+/// A status dot.
+pub fn dot(ui: &mut Ui, ink: Color32) {
+    let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+    ui.painter().circle_filled(r.center(), 3.5, ink);
 }
 
 /// How bad an alert is.
@@ -173,13 +295,30 @@ impl Alert {
             Level::Warn => (Icon::Warning, pal().warn, pal().warn_fill),
             Level::Fail => (Icon::Warning, pal().error, pal().error_fill),
         };
-        egui::Frame::new().fill(fill).corner_radius(4).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                icons::paint(ui.painter(), icon, r, ink);
-                ui.add(egui::Label::new(RichText::new(&self.text).color(ink)).wrap());
+        Frame::new()
+            .fill(fill)
+            .stroke(Stroke::new(1.0, ink.gamma_multiply(0.25)))
+            .corner_radius(RADIUS_SM)
+            .inner_margin(Margin::symmetric(10, 6))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                    icons::paint(ui.painter(), icon, r, ink);
+                    ui.add(egui::Label::new(RichText::new(&self.text).color(ink)).wrap());
+                });
             });
-        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sentence_case;
+
+    #[test]
+    fn a_shouted_title_reads_in_sentence_case() {
+        assert_eq!(sentence_case("CONTROL PANEL"), "Control panel");
+        assert_eq!(sentence_case("Devices"), "Devices");
+        assert_eq!(sentence_case(""), "");
     }
 }

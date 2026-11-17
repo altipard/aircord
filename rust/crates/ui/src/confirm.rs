@@ -6,8 +6,8 @@ use aircord_core::playbook::Playbook;
 use egui::{Align, Context, Id, Layout, Modal, RichText};
 
 use crate::App;
-use crate::style::pal;
-use crate::widgets::{Tone, button};
+use crate::style::{self, pal};
+use crate::widgets::{self, Tone, button};
 
 /// What a yes does.
 #[derive(Clone, Debug)]
@@ -36,10 +36,12 @@ impl App {
     pub(crate) fn confirm_window(&mut self, ctx: &Context) {
         let Some(c) = &self.confirm else { return };
         let (mut yes, mut no) = (false, false);
+        // PhotoCraft's dialog: a semibold title over a hairline, the body, the answers at the bottom right.
         let r = Modal::new(Id::new("confirm")).show(ctx, |ui| {
             ui.set_width(440.0);
-            ui.label(RichText::new(&c.title).heading().strong());
-            ui.add_space(8.0);
+            ui.label(RichText::new(&c.title).font(style::semibold(15.0)).color(pal().text));
+            widgets::hairline(ui);
+            ui.add_space(4.0);
             ui.label(RichText::new(&c.body).color(pal().text));
             ui.add_space(12.0);
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
