@@ -463,6 +463,11 @@ type  = "select"
         }
         let alarms = |name: &str| t.get(name).unwrap().settings.iter().filter(|s| s.key.starts_with("TEMPALARM")).count();
         assert_eq!([alarms("Dragino D20-NB"), alarms("Dragino D22-NB"), alarms("Dragino D23-NB")], [1, 2, 3], "one alarm per probe");
+        for name in ["Dragino D20-NB", "Dragino D22-NB", "Dragino D23-NB"] {
+            let ps = t.get(name).unwrap().setting("POWER_SAVE").unwrap();
+            assert_eq!(ps.risk, crate::settings::Risk::Network, "{name}: a wrong window looks like a dead node");
+            assert!(ps.check("0,8,8").is_err() && ps.check("0,22,6").is_ok(), "{name}: start and end must differ");
+        }
         let tr = t.get("Dragino D20-NB").unwrap().setting("TR").unwrap();
         assert_eq!(tr.check("120").unwrap_err(), "Bitte mindestens 180 Sekunden eingeben.");
     }

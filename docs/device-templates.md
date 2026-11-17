@@ -181,6 +181,10 @@ refused too.
 | `text` | `pattern`, `max_len`, `clearable` | Not empty, unless `clearable = true`: then an empty input clears the value and the device gets `AT+<KEY>=NULL`, the way `AT+CFG` prints an unset value. |
 | `secret` | `pattern`, `max_len`, `clearable` | Like `text`, never shown or logged in clear. |
 
+`distinct = [2, 3]` (for `text`, `secret` and the free text of a `choice`)
+refuses a value whose comma-separated parts at those positions, counted from 1,
+are equal: `AT+POWER_SAVE=0,8,8` would be a window that starts where it ends.
+
 A `pattern` must match the whole input; Aircord anchors it, so `'[a-z]{6}'`
 means exactly six lower-case letters. Write regexps as TOML literal strings
 (`'…'`) to avoid doubling every backslash.

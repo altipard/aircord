@@ -177,6 +177,9 @@ pub struct Setting {
     pub expert: bool,
     /// An empty input clears the value: the device gets `AT+<key>=NULL`, as `AT+CFG` prints an unset value.
     pub clearable: bool,
+    /// Positions (from 1) of comma-separated parts of a typed value that must differ: `[2, 3]` refuses
+    /// `AT+POWER_SAVE=0,8,8`, a window that starts where it ends.
+    pub distinct: Vec<usize>,
 }
 
 #[derive(Deserialize)]
@@ -203,6 +206,7 @@ pub(crate) struct RawSetting {
     pattern: Option<String>,
     max_len: Option<usize>,
     clearable: Option<bool>,
+    distinct: Option<Vec<usize>>,
     #[serde(default)]
     risk: String,
     #[serde(default)]
@@ -253,6 +257,7 @@ impl RawSetting {
             ("pattern", self.pattern.is_some()),
             ("max_len", self.max_len.is_some()),
             ("clearable", self.clearable.is_some()),
+            ("distinct", self.distinct.is_some()),
         ];
         given.into_iter().find(|(name, set)| *set && !allowed.contains(name)).map(|(name, _)| name)
     }
@@ -271,9 +276,9 @@ impl RawSetting {
         }
         let allowed: &[&str] = match self.kind.as_str() {
             "duration" | "number" => &["unit", "presets", "min", "max"],
-            "choice" => &["options", "custom", "pattern", "max_len"],
+            "choice" => &["options", "custom", "pattern", "max_len", "distinct"],
             "toggle" => &["on", "off"],
-            "text" | "secret" => &["pattern", "max_len", "clearable"],
+            "text" | "secret" => &["pattern", "max_len", "clearable", "distinct"],
             other => return Err(at(&format!("unknown type {other:?} (want duration|choice|toggle|text|secret|number)"))),
         };
         if let Some(name) = self.stray(allowed) {
@@ -281,6 +286,12 @@ impl RawSetting {
         }
         if self.max_len == Some(0) {
             return Err(at("max_len must be at least 1"));
+        }
+        let distinct = self.distinct.clone().unwrap_or_default();
+        if self.distinct.is_some()
+            && (distinct.len() < 2 || distinct.contains(&0) || (1..distinct.len()).any(|i| distinct[..i].contains(&distinct[i])))
+        {
+            return Err(at("distinct needs two or more different positions, counted from 1"));
         }
         let pattern = whole(self.pattern.as_deref()).map_err(|e| at(&e))?;
         let presets = self.presets.clone().unwrap_or_default();
@@ -310,8 +321,8 @@ impl RawSetting {
                 if (1..options.len()).any(|i| options[..i].iter().any(|o| o.value == options[i].value)) {
                     return Err(at("two options have the same value"));
                 }
-                if !custom && (pattern.is_some() || self.max_len.is_some()) {
-                    return Err(at("pattern and max_len only check free text: set custom = true"));
+                if !custom && (pattern.is_some() || self.max_len.is_some() || self.distinct.is_some()) {
+                    return Err(at("pattern, max_len and distinct only check free text: set custom = true"));
                 }
                 Field::Choice { options, custom, pattern, max_len: self.max_len }
             }
@@ -351,6 +362,7 @@ impl RawSetting {
             visible_if,
             expert: self.expert,
             clearable: self.clearable.unwrap_or(false),
+            distinct,
         })
     }
 }
@@ -414,9 +426,17 @@ impl Setting {
             {
                 return Err(format!("Höchstens {max} Zeichen erlaubt (eingegeben: {n})."));
             }
+            let hint = || if self.help.is_empty() { String::new() } else { format!(" {}", self.help) };
             if pattern.as_ref().is_some_and(|re| !re.is_match(v)) {
-                let hint = if self.help.is_empty() { String::new() } else { format!(" {}", self.help) };
-                return Err(format!("Die Eingabe hat nicht das erwartete Format.{hint}"));
+                return Err(format!("Die Eingabe hat nicht das erwartete Format.{}", hint()));
+            }
+            let parts: Vec<&str> = v.split(',').map(str::trim).collect();
+            let picked: Vec<&str> = self.distinct.iter().filter_map(|&i| parts.get(i - 1).copied()).collect();
+            if let Some(same) = (1..picked.len()).find_map(|i| picked[..i].contains(&picked[i]).then_some(picked[i])) {
+                if self.is_secret() {
+                    return Err(format!("Zwei Angaben sind gleich, sie müssen sich unterscheiden.{}", hint()));
+                }
+                return Err(format!("Zwei Angaben sind gleich ({same}), sie müssen sich unterscheiden.{}", hint()));
             }
             Ok(v.to_string())
         };
@@ -548,6 +568,22 @@ mod tests {
         assert!(s.check("ABC").is_err());
         assert!(!ok("key = \"UNAME\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"").clearable);
         assert!(setting("key = \"T\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"duration\"\nunit = \"s\"\nclearable = true").is_err());
+    }
+
+    #[test]
+    fn distinct_parts_must_differ() {
+        let s = ok("key = \"POWER_SAVE\"\nlabel = \"x\"\ngroup = \"g\"\nhelp = \"0,Start,Ende.\"\ntype = \"choice\"\ncustom = true\n\
+                    pattern = '0,[0-9]{1,2},[0-9]{1,2}'\ndistinct = [2, 3]\noptions = [{text = \"Immer\", value = \"1,0,0\"}]");
+        assert_eq!(s.check("0,8,8").unwrap_err(), "Zwei Angaben sind gleich (8), sie müssen sich unterscheiden. 0,Start,Ende.");
+        assert_eq!(s.check("0,8,16").unwrap(), "0,8,16");
+        assert_eq!(s.check("1,0,0").unwrap(), "1,0,0", "an offered option is not checked");
+        let base = "key = \"X\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"\n";
+        for bad in ["distinct = [2]", "distinct = [0, 1]", "distinct = [2, 2]"] {
+            assert!(setting(&format!("{base}{bad}")).is_err(), "{bad}");
+        }
+        assert!(
+            setting("key = \"X\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"toggle\"\non = \"1\"\noff = \"0\"\ndistinct = [1, 2]").is_err()
+        );
     }
 
     #[test]

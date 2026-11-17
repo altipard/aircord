@@ -292,20 +292,23 @@ max    = 32
 expert = true
 
 # Invertierte Logik: 0 = Zeitplan an, 1 = aus (Inventar 3.4). Als Auswahl, weil
-# "an" Start- und Endstunde braucht.
+# "an" Start- und Endstunde braucht. risk = network: außerhalb des Fensters
+# sendet der Knoten nichts, ein falsches Fenster sieht aus wie ein Funkloch.
 [[setting]]
-key     = "POWER_SAVE"
-label   = "Sendezeiten einschränken (UTC)"
-group   = "Messen & Senden"
-help    = "0,Startstunde,Endstunde schränkt das Senden ein, z. B. 0,8,16. 1,0,0 sendet immer."
-type    = "choice"
-options = [
+key      = "POWER_SAVE"
+label    = "Sendezeiten einschränken (UTC)"
+group    = "Messen & Senden"
+help     = "0,Startstunde,Endstunde schränkt das Senden ein, z. B. 0,8,16. 1,0,0 sendet immer."
+type     = "choice"
+options  = [
   { text = "Immer senden", value = "1,0,0" },
   { text = "Nur 8 bis 16 Uhr UTC", value = "0,8,16" },
 ]
-custom  = true
-pattern = '0,([01]?[0-9]|2[0-3]),([01]?[0-9]|2[0-3])'
-expert  = true
+custom   = true
+pattern  = '0,([01]?[0-9]|2[0-3]),([01]?[0-9]|2[0-3])'
+distinct = [2, 3]
+risk     = "network"
+expert   = true
 
 # Wirkt laut Q7 erst nach einem Neustart, wenn die Serverzeit vorher nicht
 # synchronisiert war.
