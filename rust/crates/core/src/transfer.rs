@@ -29,7 +29,7 @@ const DUMP_WAITS: u32 = 4;
 pub struct Change {
     pub key: String,
     pub label: String,
-    /// The value `AT+CFG` reported (empty for `NULL`).
+    /// The value `AT+CFG` reported (empty for `NULL`); [`redact::MASK`] for a secret, whose old value is not kept.
     pub from: String,
     /// The checked value that is sent.
     pub to: String,
@@ -93,7 +93,8 @@ pub struct FieldError {
 /// current one is no change and is not checked, so a device value outside the template's rules never blocks the
 /// others. A setting hidden by its `visible_if` (with the wanted values over the current ones) is left out. A key the
 /// template lacks, or that the device did not report, is an error, as is any value [`crate::settings::Setting::check`]
-/// refuses; every error is returned, not just the first.
+/// refuses; every error is returned, not just the first. Leave out what the person did not touch: an untouched secret
+/// passed as `""` is a change to empty, which is refused, because an empty value is never sent.
 pub fn plan(tpl: &Template, current: &Cfg, wanted: &BTreeMap<String, String>) -> Result<Vec<Change>, Vec<FieldError>> {
     let mut errors = Vec::new();
     for key in wanted.keys().filter(|k| tpl.setting(k).is_none()) {
@@ -118,7 +119,7 @@ pub fn plan(tpl: &Template, current: &Cfg, wanted: &BTreeMap<String, String>) ->
             Ok(to) => changes.push(Change {
                 key: s.key.clone(),
                 label: s.label.clone(),
-                from: have.to_string(),
+                from: if s.is_secret() { redact::MASK.into() } else { have.to_string() },
                 to,
                 secret: s.is_secret(),
                 risk: s.risk,
@@ -518,8 +519,10 @@ mod tests {
         assert_eq!(out.fields[0].status, Status::Failed { why: "Keine Verbindung, nicht gesendet.".into() });
     }
 
+    /// Covers what this module sends and returns. The reply lines of the read-back are logged by the link itself
+    /// (`<< AT+PWORD=…` in clear on an S31-NB); masking those needs the logging side to call [`redact::redact_line`].
     #[test]
-    fn passwords_never_leave_in_clear() {
+    fn a_transfer_never_sends_or_reports_a_password_in_clear() {
         let link = device();
         let log = Arc::new(Log::default());
         link.set_events(log.clone());
@@ -542,11 +545,7 @@ mod tests {
         assert!(outgoing.iter().all(|l| !l.contains("mqtt-geheim") && !l.contains("neupwx")), "{outgoing:?}");
         let results = format!("{:?}", out);
         assert!(!results.contains("mqtt-geheim") && !results.contains("neupwx") && !results.contains("kxqmzp"), "{results}");
-        // The link logs the AT+CFG read-back as it comes; masking those lines is the logging side's job.
-        let incoming: Vec<String> =
-            log.0.lock().unwrap().iter().filter(|l| l.starts_with("<< ")).map(|l| tpl.redact(l).into_owned()).collect();
-        assert!(incoming.iter().any(|l| l == "<< AT+PWD=******"), "{incoming:?}");
-        assert!(incoming.iter().all(|l| !l.contains("mqtt-geheim") && !l.contains("kxqmzp")));
+        assert!(changes.iter().filter(|c| c.secret).all(|c| c.from == "******"), "the old password is not kept");
     }
 
     #[test]
