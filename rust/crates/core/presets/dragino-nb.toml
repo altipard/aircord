@@ -1,8 +1,7 @@
 # Generic control panel for Dragino NB-IoT sensors, picked by the advertised
 # name before AT+CFG has been read. Once AT+CFG names the model, the
 # model-specific presets next to this file (dragino-s31-nb.toml, …) take over
-# with typed settings. Kept in step with internal/device/presets/dragino-nb.toml
-# of the Go build.
+# with typed settings.
 #
 # Interim: this preset goes away with the settings UI. Until then the window's
 # control panel and its tests depend on it. The "Firmware version" action sends

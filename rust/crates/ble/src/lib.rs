@@ -1,7 +1,6 @@
 //! `aircord-ble`: [`Link`] over a real radio with btleplug. The radio's work runs on a tokio runtime this crate owns;
-//! the window and the jobs call the [`Link`] methods from their own threads, as the Go build called its `ble.Client`
-//! from goroutines. The quick calls hand work to the runtime and return; `connect` and `send_raw` wait for it, so they
-//! are called from a job's thread, never the window's.
+//! the window and the jobs call the [`Link`] methods from their own threads. The quick calls hand work to the runtime
+//! and return; `connect` and `send_raw` wait for it, so they are called from a job's thread, never the window's.
 //!
 //! Writes go through one writer task, in order, so the lines of a playbook reach the device as they were sent.
 

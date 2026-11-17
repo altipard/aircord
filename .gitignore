@@ -6,21 +6,10 @@
 /blescan-app
 /ble-console
 
-# Packaging output (fyne package / release workflow)
+# Packaging output (release workflow)
 /dist/
 *.app/
 *.tar.xz
-
-# Go
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-coverage.out
-vendor/
 
 # Editor / OS
 .DS_Store

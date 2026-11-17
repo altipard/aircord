@@ -1,8 +1,8 @@
 //! The serial-over-BLE link as the rest of the app sees it: discovery, one connection, AT lines out, reply lines in.
 //! `aircord-ble` implements it over a radio; [`fake::FakeLink`] over a scripted device, for tests.
 //!
-//! Calls that wait (`connect`, `send_raw`) are made from a job's own thread, never the window's, as the Go build made
-//! them from a goroutine. The others return at once and may be called from anywhere.
+//! Calls that wait (`connect`, `send_raw`) are made from a job's own thread, never the window's. The others return at
+//! once and may be called from anywhere.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};

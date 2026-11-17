@@ -1,6 +1,5 @@
 //! What the radio and the jobs tell the window. They run on threads of their own and post here; the window takes the
-//! messages at the start of each frame, so every change to its state happens on its own thread, as the Go build
-//! marshalled everything through `fyne.Do`.
+//! messages at the start of each frame, so every change to its state happens on its own thread.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};

@@ -4,11 +4,26 @@
 //! END(0xEF)`, the CRC being IEEE CRC32 (zlib's) over START through data. It travels as the ASCII line
 //! `AT+TX=<len>,<HEX>\r\n`; the device answers with a line holding `AT+DATA=<HEX>`, a frame of the same shape whose
 //! byte 1 is a status (0 = OK). This mirrors Dragino's own open-source updater (github.com/dragino/MeshNode,
-//! tool/FirmwareUpdateUtility), the reference for every constant here. The full write-up, flash layout and what is still
-//! unverified against hardware, is in the Go package `internal/otanb`, which this ports one to one.
+//! tool/FirmwareUpdateUtility), the reference for every constant here.
 //!
 //! Upgrade: ERASE, FLASH chunks (at most 2032 bytes, a multiple of 8), VERIFY address, size and CRC, REBOOT; one
 //! round-trip each, and a non-zero status aborts. The bootloader region is never written, so a failed run can be retried.
+//!
+//! Flash layout of the STM32L072 host MCU. A `.bin` is the raw application image from [`APP_START`] on, without the
+//! bootloader; the application start is 8-byte and page (0x800) aligned.
+//!
+//! ```text
+//! 0x08000000..0x080077FF  bootloader        (never written)
+//! 0x08007800..0x0803DFFF  application       (0x36800 bytes)
+//! 0x0803E000..0x0803E7FF  factory identity  (protected)
+//! 0x0803F000..            boot control
+//! ```
+//!
+//! Not yet verified against hardware: the frame format, commands, CRC, layout and the `AT+TX`/`AT+DATA` transport come
+//! from Dragino's shared STM32 bootloader tool, so whether an NB node takes `AT+TX` or a transport verb of its own wants
+//! confirming on a real device before a production flash. Entering the bootloader (a reset within an 8 s / 12 s BLE
+//! window, after which the node advertises under its IMEI) is up to the radio and window layers, not this module. The
+//! protocol itself is tested end to end against a frame-accurate fake device.
 
 use std::fmt;
 use std::time::Duration;

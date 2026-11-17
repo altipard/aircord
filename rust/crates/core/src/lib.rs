@@ -1,7 +1,6 @@
 //! `aircord-core`: everything Aircord does that needs neither a window nor a radio. The stores (history, sessions,
 //! playbooks), device templates with typed settings, the NB bootloader protocol, and the long runs (a playbook, a
 //! firmware update, a settings transfer), written against [`link::Link`] so they are tested against a fake device.
-//! Ported from the Go packages under `internal/`; the settings ([`settings`], [`cfg`], [`transfer`]) are Rust only.
 
 pub mod banner;
 pub mod cfg;
