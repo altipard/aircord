@@ -8,36 +8,41 @@ on:
 permissions:
   contents: read
 
-# Runs on macOS: Fyne (GUI) and tinygo.org/x/bluetooth build cleanly there
-# without the system dev packages a Linux runner would require.
+env:
+  # The workspace's rust-version: CI proves the MSRV, not just the latest stable.
+  RUST_VERSION: "1.95"
+  CARGO_TERM_COLOR: always
+
+# Same gate as `task check`, on both platforms the BLE stack (CoreBluetooth,
+# BlueZ) and the window stack differ on.
 jobs:
   check:
-    name: fmt / vet / test / build
-    runs-on: macos-latest
+    name: fmt / clippy / test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: dtolnay/rust-toolchain@master
         with:
-          go-version: "1.25"
-          cache: true
-      - name: gofmt check
-        run: test -z "$(gofmt -l .)" || { echo 'gofmt needed:'; gofmt -l .; exit 1; }
-      - name: go vet
-        run: go vet ./...
-      - name: go test
-        run: go test ./...
-      - name: go build
-        run: go build ./...
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
 
-  lint:
-    name: golangci-lint
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache: true
-      - uses: golangci/golangci-lint-action@v7
-        with:
-          version: latest
+      # btleplug links libdbus (BlueZ); eframe's window stack wants the X11,
+      # Wayland, xkbcommon and GL development files.
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdbus-1-dev libxkbcommon-dev \
+            libgl1-mesa-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
