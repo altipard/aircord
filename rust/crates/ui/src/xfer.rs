@@ -76,6 +76,17 @@ fn plain_why(why: &str) -> String {
     }
 }
 
+/// The risks to warn of, each once, in the order the changes bring them up.
+fn risks_of(changes: &[Change]) -> Vec<Risk> {
+    let mut risks: Vec<Risk> = Vec::new();
+    for c in changes {
+        if risk_text(c.risk).is_some() && !risks.contains(&c.risk) {
+            risks.push(c.risk);
+        }
+    }
+    risks
+}
+
 /// A field's result: its mark and its sentence.
 pub(crate) fn result_text(tpl: &Template, key: &str, status: &Status) -> (Mark, String) {
     match status {
@@ -266,9 +277,7 @@ impl App {
                             }
                         });
                     });
-                    let mut risks: Vec<Risk> = t.changes.iter().map(|c| c.risk).filter(|r| risk_text(*r).is_some()).collect();
-                    risks.dedup();
-                    for risk in risks {
+                    for risk in risks_of(&t.changes) {
                         let names: Vec<&str> = t.changes.iter().filter(|c| c.risk == risk).map(|c| c.label.as_str()).collect();
                         ui.add_space(6.0);
                         let mut strip = Alert::default();
@@ -354,6 +363,19 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_risk_is_warned_of_once_however_the_changes_are_ordered() {
+        let tpl = aircord_core::device::Templates::load_from(std::path::Path::new("/nonexistent")).get("Dragino S31-NB").cloned().unwrap();
+        let cfg = aircord_core::cfg::Cfg::parse_text(include_str!("../../core/testdata/s31-nb-v1.4.0-cfg.txt"));
+        let wanted = [("SERVADDR", "10.0.0.9,1883"), ("PWORD", "wolken")].map(|(k, v)| (k.to_string(), v.to_string())).into();
+        let mut changes = aircord_core::transfer::plan(&tpl, &cfg, &wanted).unwrap();
+        assert_eq!(changes.len(), 2);
+        // Network, irreversible, network again: neighbours differ, so dropping repeats in a row is not enough.
+        changes.sort_by_key(|c| c.risk != Risk::Network);
+        changes.push(changes[0].clone());
+        assert_eq!(risks_of(&changes), [Risk::Network, Risk::Irreversible]);
+    }
 
     #[test]
     fn counts_and_results_read_as_sentences() {
