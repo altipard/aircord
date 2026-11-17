@@ -38,7 +38,7 @@ Dragino-Dokumentation (siehe Quellen). Nichts davon ist am Gerät geprüft.
 | Q4 | https://docs.dragino.com/docs/NB-IoT/firmware-update/ota-upgrade-for-nb-iot-lte-m-end-node/ | -NB/-NS/-NB2, -CB/-CS/-CB2 | Kein Revisionsdatum. OTA über MQTT-Server. Abgerufen 2026-11-17. |
 | Q5 | https://docs.dragino.com/docs/NB-IoT/firmware-update/ble-upgrade-for-nb-iot-lte-m-end-node/ | -NB/-NS, -CB/-CS | Kein Revisionsdatum. Firmware-Update per BLE (App „Devices.tool“). Abgerufen 2026-11-17. |
 | Q6 | https://www.dragino.com/downloads/downloads/NB-IoT/NBSN95/DRAGINO_NBSN95-NB_AT%20Commands_v1.2.0.pdf | NBSN50-95 (**anderes Gerät**) | AT Command Sets V1.2, 2021-06-28. Nur als Analogie für Antwortformat und `AT+CFG`-Ausgabe, **unsicher** für D2x/WQS. |
-| Q7 | https://wiki.dragino.com/docs/NB-IoT/temperature-humidity-sensors/s31-nb/ | S31-NB (gleiche -NB-Plattform) | Kein Revisionsdatum. Nur für die Passwort-Regel herangezogen. Abgerufen 2026-11-17. |
+| Q7 | https://wiki.dragino.com/docs/NB-IoT/temperature-humidity-sensors/s31-nb/ | S31-NB (gleiche -NB-Plattform) | Kein Revisionsdatum. Herangezogen für die Passwort-Regel (`AT+PWORD`), den Index-Eintrag `AT+GETSENSORVALUE` und die Beispielantwort `AT+EXT=?` → `0`. Abgerufen 2026-11-17. |
 | Q8 | https://docs.dragino.com/docs/NB-IoT/firmware-update/ | -NB/-CB, BC660K-GL | Übersicht der Update-Wege. Abgerufen 2026-11-17. |
 
 Nicht verwendet: D20-CB/D2x-CB (https://docs.dragino.com/docs/NB-IoT/temperature-humidity-sensors/d20-d22-d23-cb/).
@@ -96,7 +96,7 @@ Spalten in allen Tabellen: **Befehl** (Setzen / Abfragen) · **Bedeutung** ·
 | `AT` | Verbindungstest („Attention“) | – | Verbindung prüfen | Aktion | Antwort `OK` (Q6, Analogie) | harmlos | D2x, WQS | Q1, Q3 |
 | `AT?` | Kurzhilfe, listet alle Befehle | – | – (nur Experte) | Aktion | Hilfetext | harmlos | D2x, WQS | Q1 |
 | `AT+CFG` | Gibt alle Einstellungen aus | – | Einstellungen anzeigen / sichern | Aktion + Nur-Anzeige | Format für D2x/WQS **nicht dokumentiert**. Analogie Q6: eine Zeile je Einstellung, z. B. `AT+TDC=600`, dann `OK` (**unsicher**) | harmlos | D2x, WQS, NB allg. | Q1, Q2, Q3, Q6 |
-| `AT+DEUI=<id>` / `AT+DEUI=?` | Geräte-ID lesen oder setzen | Q2: `AT+CFG` zeigt eine 8-Byte-HEX-DEUI. Länge beim Setzen für D2x/WQS **nicht dokumentiert** | Geräte-ID | Nur-Anzeige | `AT+DEUI=?`, keine Beispielantwort für D2x/WQS | harmlos (Lesen) / Gerät verliert Netz (Setzen: Server ordnet Daten evtl. nicht mehr zu, Einschätzung) | D2x, WQS | Q1, Q2, Q3 |
+| `AT+DEUI=<id>` / `AT+DEUI=?` | Geräte-ID lesen oder setzen | Q2: `AT+CFG` zeigt eine 8-Byte-HEX-DEUI. Länge beim Setzen für D2x/WQS **nicht dokumentiert** | Geräte-ID | Nur-Anzeige | `AT+DEUI=?`, keine Beispielantwort für D2x/WQS | harmlos (Lesen; Setzen ist fürs Netz harmlos, die Zuordnung der Daten am Server kann aber brechen; Einschätzung) | D2x, WQS | Q1, Q2, Q3 |
 | `AT+MODEL` / `AT+MODEL=?` | Modul-/Modellinformation | nur Index | Gerätetyp und Firmware | Nur-Anzeige | Für WQS keine Beispielantwort. Analogie Q6: `NBSN95,v1.2.0` (**unsicher**) | harmlos | WQS (in Q1 für D2x nicht gelistet) | Q3, Q6 |
 | `AT+LDATA` / `AT+LDATA=?` | Zuletzt gesendete Nutzdaten | nur Index | Letzte Sendung | Nur-Anzeige | Keine Beispielantwort für D2x/WQS. Analogie Q6: Hex-String | harmlos | D2x, WQS | Q1, Q3 |
 | `AT+GETSENSORVALUE` | Aktueller Messwert | nur Index, Syntax und Parameter **nicht dokumentiert** | Messwerte jetzt ablesen | Aktion + Nur-Anzeige | nicht dokumentiert | harmlos (vermutet) | D2x, WQS | Q1, Q3, Q7 |
@@ -148,7 +148,7 @@ Abfragebefehl, siehe Abschnitt 5.
 | `AT+TDC=<s>` / `AT+TDC=?` | Sendeintervall | Sekunden, Default 7200 (2 h). Minimum **nicht dokumentiert** | Sendeintervall | Dauer | `AT+TDC=?`, keine Beispielantwort für D2x/WQS. Analogie Q6: `600` dann `OK` | harmlos (kurz = Batterie leer) | D2x, WQS, NB allg. | Q1, Q2, Q3 |
 | `AT+TR=<s>` / `AT+TR=?` | Messintervall (Aufzeichnung) | Sekunden, Minimum 180. Default Q1 900, Q2 1800 (**Widerspruch**) | Messintervall | Dauer | `AT+TR=?`, keine Beispielantwort | harmlos | D2x, NB allg. | Q1, Q2 |
 | `AT+NOUD=<n>` / `AT+NOUD=?` | Anzahl gespeicherter Messungen je Sendung | Default 8, Maximum 32, Untergrenze nicht dokumentiert. Laut Q1 durch Clock Logging abgelöst | Messungen pro Sendung | Text mit Validierung (max. 32) | `AT+NOUD=?`, keine Beispielantwort | harmlos | D2x, NB allg. | Q1, Q2 |
-| `AT+CLOCKLOG=<a>,<b>,<c>,<d>` | Zeitgesteuerte Messung | a 0/1 an; b Startsekunde 0–3599 oder 65535 (= nach erster Sendung); c Intervall 0–255 min; d Einträge je Sendung, max. 32. „Aus“ laut Doku `1,65535,0,0`. Setzt synchronisierte Serverzeit voraus. D2x ab v1.2.1 | Messung zur vollen Zeit | Schalter + Dauer + Text mit Validierung (Anzahl) | nicht dokumentiert | harmlos | D2x, WQS | Q1, Q3 |
+| `AT+CLOCKLOG=<a>,<b>,<c>,<d>` | Zeitgesteuerte Messung | a 0/1 an; b Startsekunde 0–3599 oder 65535 (= nach erster Sendung); c Intervall 0–255 min; d Einträge je Sendung, max. 32. „Aus“ laut Doku `1,65535,0,0`. Setzt synchronisierte Serverzeit voraus. D2x ab v1.2.1 | Messung zur vollen Zeit | Schalter + Dauer + Text mit Validierung (Anzahl) | nicht dokumentiert | harmlos | D2x, WQS (**unsicher**: Q3 beschreibt den Befehl als „Get or set SHT record time“, also mit dem Text des Temperatursensors, ohne Versionsangabe) | Q1, Q3 |
 | `AT+POWER_SAVE=<a>,<b>,<c>` / `AT+POWER_SAVE=?` | Senden nur in einem Zeitfenster (UTC) | a: 0 = Zeitplan an, 1 = aus; b/c Start-/Endstunde. Default `1,0,0`. Beispiel `0,8,16`. D2x ab v1.3.4 | Sendezeiten einschränken | Schalter + Auswahl (Start- und Endstunde) | `AT+POWER_SAVE=?` → `1,0,0` dann `ok` (Q1) | harmlos (außerhalb des Fensters keine Daten) | D2x | Q1 |
 | `AT+CFGMOD=<n>` / `AT+CFGMOD=?` | Arbeitsmodus | WQS: 1 Interrupt (Default), 2 Zählen. Für D2x nur Index | – (Experte) | Auswahl | `AT+CFGMOD=?`, keine Beispielantwort | harmlos | D2x (nur Index), WQS | Q1, Q3 |
 | `AT+INTMOD=<0..3>` / `AT+INTMOD=?` | Auslöser des externen Interrupts | 0 aus, 1 steigende und fallende Flanke, 2 fallend, 3 steigend. D2x: Pin ab v1.1.2 PA8 statt PB15 | Sendung bei externem Signal | Auswahl | `AT+INTMOD=?`, keine Beispielantwort | harmlos | D2x, WQS | Q1, Q3 |
@@ -164,6 +164,7 @@ Die Doku beschreibt dafür den Tastendruck 1–3 s (Q1).
 | ------ | --------- | -------------------------------- | ----------------- | ------------- | --------- | ------ | --------- | ------ |
 | sechs Zeichen vom Etikett (`AT+PIN=xxxxxx` auf dem Etikett) | Schaltet die AT-Kommandozeile frei | 6 Zeichen, gerätespezifisch | Gerätepasswort | Text mit Validierung (6 Zeichen, maskiert) | kein Rücklesen. Bestätigung „Password correct“ laut Q5 nur in der Dragino-App beschrieben | harmlos | D2x, WQS, NB allg. | Q1, Q3, Q5 |
 | `AT+PWORD=<xxxxxx>` | Gerätepasswort ändern | 6 Zeichen. Nur Kleinbuchstaben laut Q7 (S31-NB), in Q1/Q3 nicht erwähnt (**unsicher**) | Gerätepasswort ändern | Text mit Validierung (zweimal eingeben) | Abfrage nicht dokumentiert. Q6 zeigt `AT+PWORD=?` mit Klartext-Antwort, **unsicher** für D2x/WQS | irreversibel im Feld (vergessenes Passwort lässt sich laut Q2 nur per STM32CubeProgrammer auslesen; Einschätzung) | D2x, WQS | Q1, Q3, Q7, Q2 |
+
 TLS (`AT+TLSMOD`) steht unter 3.3. Zertifikate für TLS werden laut Q2 mit „Standard-AT-Befehlen“ geschrieben (ab
 Stack 006). Die Syntax steht nicht auf den ausgewerteten Seiten.
 
@@ -197,7 +198,7 @@ Bootloader v1.3.
 | `AT+TEMPALARM1=<min>,<max>` | Temperaturalarm Fühler 1 | Ganzzahlig. Einheit nicht ausdrücklich genannt, vermutlich °C (**unsicher**). min=0: Alarm über max; max=0: Alarm unter min; beide ≠0: außerhalb. Beispiel `20,20` = Alarm aus | Temperaturalarm Fühler 1 | Schalter + Text mit Validierung (min, max) | nicht dokumentiert | harmlos | D2x | Q1 |
 | `AT+TEMPALARM2=<min>,<max>` | Temperaturalarm Fühler 2 | wie oben | Temperaturalarm Fühler 2 | wie oben | nicht dokumentiert | harmlos | D22-NB, D23-NB (Fühlerzahl laut Q1) | Q1 |
 | `AT+TEMPALARM3=<min>,<max>` | Temperaturalarm Fühler 3 | wie oben | Temperaturalarm Fühler 3 | wie oben | nicht dokumentiert | harmlos | D23-NB | Q1 |
-| `AT+CALPH=<4\|6\|9>` | pH-Kalibrierung, 3 Punkte | 4 = pH 4,00; 6 = 6,86; 9 = 9,18 | pH-Sonde kalibrieren | Aktion (Assistent je Pufferlösung) | Antwort z. B. `HEX:10 06 00 22 07 24 28 aa` dann `OK` | irreversibel (überschreibt die Kalibrierung; Einschätzung) | WQS (pH-Sonde) | Q3 |
+| `AT+CALPH=<4\|6\|9>` | pH-Kalibrierung, 3 Punkte | 4 = pH 4,00; 6 = 6,86; 9 = 9,18 | pH-Sonde kalibrieren | Aktion (Assistent je Pufferlösung) | Antwort z. B. `HEX:10 06 00 22 07 24 28 aa` dann `OK` | harmlos, mit Bestätigung (überschreibt die bisherige Kalibrierung, eine Neukalibrierung ist möglich; Einschätzung, Q3 sagt dazu nichts) | WQS (pH-Sonde) | Q3 |
 | `AT+CALORP=<86\|256>` | ORP-Kalibrierung, 2 Punkte | 86 mV, 256 mV | ORP-Sonde kalibrieren | Aktion (Assistent) | Antwort z. B. `HEX:13 06 00 24 07 dc c9 1a` dann `OK` | wie oben | WQS (ORP-Sonde) | Q3 |
 | `AT+CALEC=<1\|10>` | EC-Kalibrierung, 1 Punkt | 1 = 1413 µS/cm, 10 = 12,88 mS/cm | Leitfähigkeit kalibrieren | Aktion (Assistent) | Antwort z. B. `HEX:12 01 00 26 00 02 A2 A0` dann `OK` | wie oben | WQS (EC-Sonde) | Q3 |
 | `AT+CALNTU=<0\|2\|4\|6\|8\|10>` | Trübungs-Kalibrierung | Stufen 0–10 (Bereich 0–1000 NTU) | Trübung kalibrieren | Aktion (Assistent) | Antwort z. B. `HEX:15 06 00 5E 00 01 2A CC` dann `OK` | wie oben | WQS (Trübungssonde) | Q3 |
@@ -217,17 +218,24 @@ beim MQTT-Zugang.
 
 1. **Verbindung prüfen** (`AT`): zeigt dem Laien sofort, ob Passwort und Link stimmen.
 2. **Geräte-ID und Einstellungen anzeigen** (`AT+CFG`, `AT+DEUI=?`): Abgleich mit dem Etikett und Vorher-Stand für das Protokoll.
-3. **Messwerte jetzt ablesen** (`AT+GETSENSORVALUE`, ersatzweise `AT+LDATA`): sichtbarer Funktionsnachweis im Feld, Syntax vorher am Gerät klären.
+3. **Messwerte jetzt ablesen** (`AT+GETSENSORVALUE`), **blockiert bis Gerätetest**: sichtbarer Funktionsnachweis im Feld. Die Syntax von `AT+GETSENSORVALUE` ist nicht dokumentiert, und `AT+LDATA` liefert nur die letzte Sendung, keinen aktuellen Messwert.
 4. **Mobilfunkanbieter / APN** (`AT+APN`): ohne passenden APN kein Netz; als Anbieterauswahl mit Freitext-Ausweg.
-5. **Funkband / Region** (`AT+QBAND`): Auswahl „Europa (B8, B20)“ usw. beschleunigt die Einbuchung und ist für Laien als Region verständlich.
+5. **Funkband / Region** (`AT+QBAND`), **vorbehaltlich Gerätetest**, weil der Befehl nur in Q2 steht, nicht in den Befehlslisten von Q1/Q3: Auswahl „Europa (B8, B20)“ usw. beschleunigt die Einbuchung und ist für Laien als Region verständlich.
 6. **Übertragungsart** (`AT+PRO`): fertige Kombinationen wie „MQTT, JSON“ statt zweier Zahlen.
 7. **Server und Port** (`AT+SERVADDR`): ohne korrekte Adresse kommen keine Daten an; Validierung von Host und Port.
 8. **MQTT-Zugang** (`AT+CLIENT`, `AT+UNAME`, `AT+PWD`, `AT+PUBTOPIC`, `AT+SUBTOPIC`): als ein Block, nur sichtbar wenn MQTT gewählt ist.
-9. **Sendeintervall** (`AT+TDC`): wichtigster Hebel für Batterielaufzeit und Datenmenge.
+9. **Sendeintervall** (`AT+TDC`): wichtigster Hebel für Batterielaufzeit und Datenmenge. Die Oberfläche muss die Einheit anzeigen (Sekunden laut Q1–Q3) und den Wert nach dem Setzen mit `AT+TDC=?` zurücklesen und vergleichen, weil `docs/provisioning.md` vor Firmware warnt, deren `AT+TDC` Minuten statt Sekunden erwartet.
 10. **Messintervall** (`AT+TR`, nur D2x): bestimmt die Auflösung der Messreihe unabhängig vom Senden.
 11. **Temperaturalarm** (`AT+TEMPALARM1..3`, nur D2x, Anzahl je Fühlerzahl): typischer Anwenderwunsch, klare Min/Max-Semantik.
-12. **Sonde kalibrieren** (`AT+CAL*`, nur WQS, als Assistent): wiederkehrende Feldaufgabe, braucht geführte Schritte statt Befehlen.
+12. **Sonde kalibrieren** (`AT+CAL*`, nur WQS, als Assistent): wiederkehrende Feldaufgabe, braucht geführte Schritte statt Befehlen. Jeder Kalibrierschritt wird vorher bestätigt, und der Vorher-Stand (Messwert bzw. `AT+CFG`) wird ins Protokoll geschrieben.
 13. **Neu starten** (`ATZ`, mit Bestätigung): schließt jede Konfiguration ab und ist der erste Schritt bei Problemen.
+
+**Vorab am Gerät zu klären:** Für **Firmware-Version** und **Signalstärke**
+dokumentiert Dragino keinen Abfragebefehl (offene Punkte 2 und 3). Beide gehören
+in die Laien-Oberfläche, sobald der Befehl am Gerät feststeht. Bis dahin setzt
+das Preset `internal/device/presets/dragino-nb.toml` mit `AT+VER` einen
+unbelegten Befehl voraus. `docs/provisioning.md` (Schritt 3) verlangt, die
+Firmware-Version vor der Konfiguration abzulesen, nennt aber keinen Befehl.
 
 ### Nur im Expertenmodus
 
@@ -253,7 +261,8 @@ beim MQTT-Zugang.
 ### Unterschiede zwischen Firmware-Versionen und Geräten
 
 - **D2x-Firmware:** ab v1.1.2 Interrupt-Pin PA8 statt PB15; ab v1.2.1
-  `AT+CLOCKLOG` und `AT+FDR1` (Versionstabelle Q2 nennt D20-NB); ab v1.3.0
+  `AT+CLOCKLOG` (Q1) und `AT+FDR1` (nur für D20-NB belegt, Versionstabelle Q2;
+  D22-NB/D23-NB **unsicher**); ab v1.3.0
   `AT+DOWNTE`, `AT+BKDNS`; ab v1.3.4 Datalog (`AT+PLDTA`, `AT+PDTA`,
   `AT+CLRDTA`) und `AT+POWER_SAVE` (Q1).
 - **WQS-Firmware:** `AT+BKDNS` ab v1.0.2; v1.1.0 meldet zusätzlich die
@@ -325,9 +334,15 @@ die Oberfläche gebaut wird.
    (Löschform), TLS-Zertifikatsbefehlen und `AT+QCGDEFCONT`.
 8. **`AT+FDR` und Passwort:** Setzt `AT+FDR` das Passwort auf das Etikett
    zurück? `AT+FDR1` auf D22-NB, D23-NB vorhanden?
-9. **Abfrage von `AT+PWORD`:** Gibt `AT+PWORD=?` das Passwort im Klartext aus
-   (wie in Q6)? Dann darf die Oberfläche die Antwort nicht ins Protokoll
-   schreiben.
+9. **Passwörter im Klartext:** Gibt `AT+PWORD=?` das Gerätepasswort im
+   Klartext aus (wie in Q6)? Enthält die Ausgabe von `AT+CFG` Zeilen mit
+   `AT+PWD` (MQTT-Passwort) oder `AT+PWORD` im Klartext? Q6 zeigt für NBSN95
+   `AT+PWORD=12345678` in der `AT+CFG`-Ausgabe. Vorschlag unabhängig vom
+   Ergebnis: Aircord maskiert in Terminal-Transkript, gespeichertem Protokoll
+   und Anzeige die Werte von `AT+PWD`, `AT+PWORD`, `AT+OTAPWD` und die
+   Passworteingabe, sowohl in gesendeten Befehlen als auch in Antwortzeilen
+   und `AT+CFG`-Ausgaben. So bleibt das Protokoll aus `docs/provisioning.md`
+   weitergebbar.
 10. **Einheit von `AT+TEMPALARMx`** (°C ganzzahlig vermutet) und Zuordnung
     Fühler ↔ Farbe.
 11. **Modellerkennung in Aircord:** Das Preset matcht `(?i)^(d20|d23|wqs)`, also
