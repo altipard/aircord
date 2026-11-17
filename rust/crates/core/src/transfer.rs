@@ -242,7 +242,16 @@ fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Res
     link.send(READ_CMD);
     let (lines, end) = collect(tap, wait, wait * DUMP_WAITS, stop);
     match end {
-        End::Ok => Ok(Cfg::parse(lines.iter().map(String::as_str).chain(["OK"]))),
+        End::Ok => {
+            let cfg = Cfg::parse(lines.iter().map(String::as_str).chain(["OK"]));
+            if cfg.is_empty() {
+                Err(format!("{READ_CMD} hat keine Einstellungen geliefert."))
+            } else if cfg.model.is_none() {
+                Err(format!("{READ_CMD} nennt kein Gerätemodell (AT+MODEL fehlt)."))
+            } else {
+                Ok(cfg)
+            }
+        }
         End::Error(e) => Err(format!("Das Gerät hat {READ_CMD} abgelehnt ({e}).")),
         End::Timeout => Err(format!("Keine vollständige Antwort auf {READ_CMD}.")),
         End::Closed => Err("Verbindung verloren.".into()),
@@ -250,7 +259,8 @@ fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Res
     }
 }
 
-/// Sends `AT+CFG` and reads the dump. Waits: call it from a job's thread.
+/// Sends `AT+CFG` and reads the dump. A dump without settings or without its `AT+MODEL` line is an error: it is not
+/// the device's state, and without the model no template can be chosen. Waits: call it from a job's thread.
 pub fn read_cfg(link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Result<Cfg, String> {
     read_on(&link.lines(), link, wait, stop)
 }
@@ -612,6 +622,10 @@ mod tests {
         noisy.reply("AT+CFG", &["[28891]Signal Strength:99", "AT+MODEL=S31-NB,v1.4.0", "", "AT+TDC=900", "OK"]);
         let cfg = read_cfg(&noisy, WAIT, &AtomicBool::new(false)).unwrap();
         assert_eq!((cfg.model.as_deref(), cfg.get("TDC")), (Some("S31-NB"), Some("900")));
+        noisy.reply("AT+CFG", &["OK"]);
+        assert_eq!(read_cfg(&noisy, WAIT, &AtomicBool::new(false)).unwrap_err(), "AT+CFG hat keine Einstellungen geliefert.");
+        noisy.reply("AT+CFG", &["AT+TDC=900", "OK"]);
+        assert_eq!(read_cfg(&noisy, WAIT, &AtomicBool::new(false)).unwrap_err(), "AT+CFG nennt kein Gerätemodell (AT+MODEL fehlt).");
         noisy.reply("AT+CFG", &["AT_ERROR"]);
         assert_eq!(read_cfg(&noisy, WAIT, &AtomicBool::new(false)).unwrap_err(), "Das Gerät hat AT+CFG abgelehnt (AT_ERROR).");
         assert!(is_error_reply("AT_PARAM_ERROR") && is_error_reply("at_test_param_overflow") && is_error_reply("ERROR"));
