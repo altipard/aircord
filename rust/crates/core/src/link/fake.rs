@@ -40,6 +40,10 @@ struct State {
     rejects: BTreeMap<String, String>,
     /// Keys whose set is answered `OK` but not kept.
     ignored: BTreeSet<String>,
+    /// Keys whose set is kept but answered with nothing.
+    silent: BTreeSet<String>,
+    /// Keys whose set drops the link, as a device that resets mid-command.
+    drops: BTreeSet<String>,
 }
 
 /// The fake link. Everything happens inline, on the caller's thread.
@@ -89,6 +93,16 @@ impl FakeLink {
     /// A set of `key` is answered `OK` and changes nothing, as firmware that quietly drops a value.
     pub fn ignore_set(&self, key: &str) {
         lock(&self.state).ignored.insert(key.into());
+    }
+
+    /// A set of `key` is kept but never answered, as a device too busy to say `OK`.
+    pub fn silent_set(&self, key: &str) {
+        lock(&self.state).silent.insert(key.into());
+    }
+
+    /// A set of `key` drops the link instead of answering.
+    pub fn drop_on_set(&self, key: &str) {
+        lock(&self.state).drops.insert(key.into());
     }
 
     /// What a configured device holds for `key`, as `AT+CFG` would print it.
@@ -158,6 +172,9 @@ impl FakeLink {
             }
             return (Vec::new(), true);
         }
+        if setting_line(cmd).is_some_and(|(key, _)| s.drops.contains(key)) {
+            return (Vec::new(), true);
+        }
         if let Some(lines) = s.replies.get(cmd) {
             return (lines.clone(), false);
         }
@@ -166,7 +183,7 @@ impl FakeLink {
 
     /// A configured device's answer to `AT+CFG` or a set; none for anything else or a device without settings.
     fn settings_answer(s: &mut State, cmd: &str) -> Option<Vec<String>> {
-        let State { cfg, rejects, ignored, .. } = s;
+        let State { cfg, rejects, ignored, silent, .. } = s;
         let dump = cfg.as_mut()?;
         if cmd.trim().eq_ignore_ascii_case("AT+CFG") {
             return Some(dump.iter().cloned().chain(["OK".to_string()]).collect());
@@ -180,7 +197,7 @@ impl FakeLink {
         {
             *line = format!("AT+{key}={}", if value.is_empty() { "NULL" } else { value });
         }
-        Some(vec!["OK".into()])
+        Some(if silent.contains(key) { Vec::new() } else { vec!["OK".into()] })
     }
 
     fn deliver(&self, replies: Vec<String>, resets: bool) {

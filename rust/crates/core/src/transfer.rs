@@ -252,14 +252,25 @@ pub fn read_cfg(link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Result<Cf
     read_on(&link.lines(), link, wait, stop)
 }
 
-/// Sends each change and checks its reply, then reads `AT+CFG` again and reports every change. A refused or
-/// unanswered change does not stop the others, they are independent settings; a lost link or `stop` does, and the
-/// rest are reported as not sent. Secrets go out through [`Link::send_secret`], so their echo is masked, and no
-/// result carries their value. `ATZ` is never sent.
+/// What became of one set command before the read-back.
+enum Sent {
+    /// Answered `OK`.
+    Taken,
+    /// Sent, but no `OK` or error came (silence, a lost link, a stop): the read-back decides.
+    Unanswered(String),
+    /// Answered with an error, or never sent.
+    Failed(String),
+}
+
+/// Sends each change and checks its reply, then reads `AT+CFG` again and reports every change. A refused change does
+/// not stop the others, they are independent settings; a lost link or `stop` does, and the rest are reported as not
+/// sent. A change that got no answer is judged by the read-back like the others, since the device may well have taken
+/// it. Secrets go out through
+/// [`Link::send_secret`], so their echo is masked, and no result carries their value. `ATZ` is never sent.
 pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicBool, report: &mut dyn FnMut(Progress)) -> Outcome {
     let tap = link.lines();
     let total = changes.len();
-    let mut sent: Vec<Result<(), String>> = Vec::with_capacity(total);
+    let mut sent: Vec<Sent> = Vec::with_capacity(total);
     let mut halted: Option<String> = None;
     for (i, c) in changes.iter().enumerate() {
         if halted.is_none() {
@@ -270,7 +281,7 @@ pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicB
             }
         }
         if let Some(why) = &halted {
-            sent.push(Err(why.clone()));
+            sent.push(Sent::Failed(why.clone()));
             continue;
         }
         report(Progress::Sending { n: i + 1, total, key: c.key.clone(), label: c.label.clone() });
@@ -282,20 +293,20 @@ pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicB
         }
         let (_, end) = collect(&tap, wait, wait, stop);
         sent.push(match end {
-            End::Ok => Ok(()),
-            End::Error(e) => Err(format!("Das Gerät hat den Wert abgelehnt ({e}).")),
-            End::Timeout => Err("Keine Antwort vom Gerät.".into()),
+            End::Ok => Sent::Taken,
+            End::Error(e) => Sent::Failed(format!("Das Gerät hat den Wert abgelehnt ({e}).")),
+            End::Timeout => Sent::Unanswered("Keine Antwort vom Gerät.".into()),
             End::Closed => {
                 halted = Some("Verbindung verloren, nicht gesendet.".into());
-                Err("Verbindung verloren.".into())
+                Sent::Unanswered("Verbindung verloren.".into())
             }
             End::Stopped => {
                 halted = Some("Abgebrochen, nicht gesendet.".into());
-                Err("Abgebrochen.".into())
+                Sent::Unanswered("Abgebrochen.".into())
             }
         });
     }
-    let readback = if sent.iter().any(Result::is_ok) {
+    let readback = if sent.iter().any(|s| !matches!(s, Sent::Failed(_))) {
         report(Progress::Verifying);
         Some(read_on(&tap, link, wait, stop))
     } else {
@@ -306,14 +317,15 @@ pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicB
         .zip(sent)
         .map(|(c, result)| {
             let status = match (result, &readback) {
-                (Err(why), _) => Status::Failed { why },
-                (Ok(()), Some(Ok(cfg))) => match cfg.get(&c.key) {
+                (Sent::Failed(why), _) => Status::Failed { why },
+                (_, Some(Ok(cfg))) => match cfg.get(&c.key) {
                     None => Status::Unverified { why: "Das Gerät meldet diese Einstellung nicht.".into() },
                     Some(v) if c.holds(v) => Status::Verified,
                     Some(v) => Status::Differs { actual: if c.secret { redact::MASK.into() } else { v.to_string() } },
                 },
-                (Ok(()), Some(Err(why))) => Status::Unverified { why: why.clone() },
-                (Ok(()), None) => Status::Unverified { why: "Nicht erneut gelesen.".into() },
+                (Sent::Taken, Some(Err(why))) => Status::Unverified { why: why.clone() },
+                (Sent::Unanswered(first), Some(Err(why))) => Status::Unverified { why: format!("{first} Erneutes Lesen: {why}") },
+                (Sent::Taken | Sent::Unanswered(_), None) => Status::Unverified { why: "Nicht erneut gelesen.".into() },
             };
             FieldResult { key: c.key.clone(), label: c.label.clone(), status }
         })
@@ -469,16 +481,26 @@ mod tests {
     }
 
     #[test]
-    fn at_error_and_silence_are_failures() {
+    fn an_error_fails_and_silence_is_judged_by_the_read_back() {
         let link = device();
         link.reject("TDC", "AT_ERROR");
         link.reply("AT+SHTEMP=20,30", &[]);
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
         let (out, _) = run(&link, &changes);
         assert_eq!(out.fields[0].status, Status::Failed { why: "Das Gerät hat den Wert abgelehnt (AT_ERROR).".into() });
-        assert_eq!(out.fields[1].status, Status::Failed { why: "Keine Antwort vom Gerät.".into() });
+        assert_eq!(out.fields[1].status, Status::Differs { actual: "0,0".into() }, "silent and not kept");
+        assert!(out.readback.is_some(), "a silence is checked against the device");
         assert!(!out.reboot_needed);
-        assert!(out.readback.is_none(), "nothing was taken, nothing to read back");
+    }
+
+    #[test]
+    fn a_silent_device_that_kept_the_value_is_verified_and_its_restart_is_due() {
+        let link = device();
+        link.silent_set("PRO");
+        let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("PRO", "3,5")])).unwrap();
+        let (out, _) = run(&link, &changes);
+        assert_eq!(out.fields[0].status, Status::Verified);
+        assert!(out.reboot_needed);
     }
 
     #[test]
