@@ -317,9 +317,10 @@ mod tests {
         assert_eq!(cfg.get("PWORD"), Some("kxqmzp"), "the reader still gets the real value");
         link.send("AT+PWORD=neupwx");
         link.send("AT+PWD=mqtt-geheim");
+        link.send("AT+PIN=349011");
         read_cfg(&link, Duration::from_millis(200), &AtomicBool::new(false)).unwrap();
         let lines = lock(&log.0).clone();
-        for secret in ["kxqmzp", "neupwx", "mqtt-geheim"] {
+        for secret in ["kxqmzp", "neupwx", "mqtt-geheim", "349011"] {
             assert!(lines.iter().all(|l| !l.contains(secret)), "{secret} in {lines:?}");
         }
         for masked in [">> AT+PWORD=******", ">> AT+PWD=******", "<< AT+PWORD=******", "<< AT+PWD=******"] {

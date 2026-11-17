@@ -1,5 +1,6 @@
 //! Masking of passwords in anything that reaches a log, a transcript or the screen. The device password
-//! (`AT+PWORD`), the MQTT password (`AT+PWD`) and the OTA password (`AT+OTAPWD`) are always masked, whatever a template
+//! (`AT+PWORD`, and `AT+PIN` as the label prints it), the MQTT password (`AT+PWD`) and the OTA password (`AT+OTAPWD`)
+//! are always masked, whatever a template
 //! says: an S31-NB on firmware v1.4.0 prints `AT+PWORD` in clear in its `AT+CFG` dump, and a saved transcript travels
 //! into bug reports. Templates add their own `type = "secret"` keys on top.
 
@@ -9,7 +10,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 /// Keys whose value is masked everywhere, template or not.
-pub const ALWAYS_SECRET: &[&str] = &["PWORD", "PWD", "OTAPWD"];
+pub const ALWAYS_SECRET: &[&str] = &["PWORD", "PIN", "PWD", "OTAPWD"];
 
 /// What a secret value is shown as. Fixed length, so the mask does not give away how long the value is.
 pub const MASK: &str = "******";
@@ -66,13 +67,14 @@ mod tests {
         assert_eq!(redact_line("<< AT+PWD=s3cr3t-token", &[]), "<< AT+PWD=******");
         assert_eq!(redact_line(">> at+pwd=x", &[]), ">> at+pwd=******", "case does not matter");
         assert_eq!(redact_line("AT+OTAPWD=ota", &[]), "AT+OTAPWD=******");
+        assert_eq!(redact_line(">> AT+PIN=349011", &[]), ">> AT+PIN=******", "the label's form of the password");
         assert_eq!(redact_line("AT+PWD=NULL", &[]), "AT+PWD=******", "even an empty one");
         assert_eq!(redact_line("AT+PWORD=abc\r", &[]), "AT+PWORD=******\r");
     }
 
     #[test]
     fn other_lines_pass_unchanged() {
-        for line in ["AT+TDC=900", "AT+UNAME=pwd", "AT+PWORDX=1", "Password Correct", "AT+PWD", "AT+PWD?"] {
+        for line in ["AT+TDC=900", "AT+UNAME=pwd", "AT+PWORDX=1", "Password Correct", "AT+PWD", "AT+PWD?", "AT+PINX=1"] {
             assert!(matches!(redact_line(line, &[]), Cow::Borrowed(l) if l == line), "{line}");
         }
     }
