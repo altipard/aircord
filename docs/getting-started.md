@@ -9,11 +9,12 @@ or build from source:
 ```sh
 git clone https://github.com/altipard/aircord.git
 cd aircord
-go run .
+cargo run -p aircord
 ```
 
-Building needs **Go 1.25+**. On Linux you also need the Fyne GUI development
-packages (`libgl1-mesa-dev`, `xorg-dev`).
+Building needs **Rust 1.95+** (via [rustup](https://rustup.rs)). On Linux you
+also need `pkg-config libdbus-1-dev libxkbcommon-dev libgl1-mesa-dev
+libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev`.
 
 The macOS app is not code-signed. On first launch, right-click the app and
 choose *Open* rather than double-clicking, otherwise Gatekeeper refuses it.

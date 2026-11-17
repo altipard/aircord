@@ -233,7 +233,7 @@ beim MQTT-Zugang.
 **Vorab am Gerät zu klären:** Für **Firmware-Version** und **Signalstärke**
 dokumentiert Dragino keinen Abfragebefehl (offene Punkte 2 und 3). Beide gehören
 in die Laien-Oberfläche, sobald der Befehl am Gerät feststeht. Bis dahin setzt
-das Preset `internal/device/presets/dragino-nb.toml` mit `AT+VER` einen
+das Preset `crates/core/presets/dragino-nb.toml` mit `AT+VER` einen
 unbelegten Befehl voraus. `docs/provisioning.md` (Schritt 3) verlangt, die
 Firmware-Version vor der Konfiguration abzulesen, nennt aber keinen Befehl.
 

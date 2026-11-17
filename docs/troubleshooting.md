@@ -38,7 +38,7 @@ points at the adapter, `connect failed` at the device.
 The device does not expose a serial service Aircord recognises. The GATT dump
 above that line lists every service and characteristic found. If your device
 speaks a transparent-UART profile under different UUIDs, add them to
-`uartProfiles` in `internal/ble/ble.go`.
+`PROFILES` in `crates/ble/src/lib.rs`.
 
 Some devices expose their serial service only after authentication, so try again
 after the PIN has been accepted.

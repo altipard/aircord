@@ -21,8 +21,8 @@ make field work bearable — a **control panel** of named buttons instead of AT
 syntax, **playbooks** that replay a provisioning sequence step by step, and
 **sessions** that bring your working set back after a break.
 
-Built with [Fyne](https://fyne.io) and
-[tinygo.org/x/bluetooth](https://github.com/tinygo-org/bluetooth).
+Built in Rust with [egui/eframe](https://github.com/emilk/egui) and
+[btleplug](https://github.com/deviceplug/btleplug).
 
 ## Features
 
@@ -60,9 +60,12 @@ Built with [Fyne](https://fyne.io) and
 
 ## Requirements
 
-- **Go 1.25+** (to build from source)
+- **Rust 1.95+** via [rustup](https://rustup.rs) (to build from source). Linux
+  additionally needs `pkg-config libdbus-1-dev libxkbcommon-dev libgl1-mesa-dev
+  libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev`.
 - **macOS** — developed and runtime-tested here (uses CoreBluetooth). CI builds
-  Linux and Windows packages too, but their runtime is **unverified**.
+  Linux (BlueZ) and Windows (WinRT) packages too, but their runtime is
+  **unverified**.
 - Bluetooth enabled. macOS prompts for Bluetooth permission on the first scan.
 
 ## Download
@@ -77,24 +80,22 @@ Using [Task](https://taskfile.dev) (`brew install go-task/tap/go-task`):
 
 ```sh
 task run          # build and run
-task build        # -> ./bin/aircord
-task package      # native app bundle (macOS .app, Linux .tar.xz, Windows .exe)
-task check        # gofmt check + go vet + golangci-lint + tests
+task build        # -> target/release/aircord
+task package      # native package in dist/ (macOS Aircord.app, Linux .tar.xz, Windows .exe)
+task check        # fmt check + clippy + tests — the CI gate
 task --list       # all tasks
 ```
 
-Or plain Go:
+Or plain Cargo:
 
 ```sh
-go run .
-go build -o bin/aircord .
-go test ./...
+cargo run -p aircord
+cargo build --release -p aircord
+cargo test --workspace
 ```
 
-> `task run` and `go run .` start a bare binary. On macOS the Dock then shows
-> the icon of whatever launched it — usually Terminal — because the app's own
-> icon and identity live in the `.app` bundle. Use `task package` and launch
-> `Aircord.app` to see the real thing.
+> `task run` and `cargo run -p aircord` start a bare binary; `task package`
+> builds the packaged app (`Aircord.app` on macOS).
 
 ## Supported UART profiles
 
@@ -105,8 +106,8 @@ go test ./...
 
 The HM-10 (`0xFFE1`) profile covers TI CC254x transparent-UART modules — for
 example the Dragino D20S-NB. To support another device, read the GATT dump in
-the terminal and add its write/notify UUIDs to `uartProfiles` in
-`internal/ble/ble.go`.
+the terminal and add its write/notify UUIDs to `PROFILES` in
+`crates/ble/src/lib.rs`.
 
 ## Where your data lives
 
@@ -129,32 +130,52 @@ Everything Aircord persists sits under the OS user-config directory:
 
 ## Project layout
 
-The Fyne/BLE UI lives in the root `main` package; reusable, GUI-free logic is
-split into `internal/` packages, each unit-tested.
+A Cargo workspace. Everything that needs neither a window nor a radio lives in
+`aircord-core` and is unit-tested against a fake device; the radio and the
+window are thin crates on top.
 
 | Path | Responsibility |
 | ---- | -------------- |
-| `main.go` | app entry, window, icon |
-| `scanner.go` | UI state + widgets; wires the `ble.Client` |
-| `scan.go` | scan controls + device-table snapshot/filter |
-| `connect.go` | connect/disconnect flow + `ble.Events` handling |
-| `panel.go` | control panel rendered from a device template |
-| `session_ui.go` | modal helper, session save/load dialog |
-| `playbook_ui.go` | playbook editor and runner |
-| `ota_ui.go` | firmware update: reset into the bootloader, reconnect, flash |
-| `terminal.go` | terminal log, alerts and status line |
-| `ui.go` | widget construction + layout |
-| `widgets.go` | reusable UI pieces (dark theme, alert line, table layout) |
-| `history.go` | fzf-style command history picker |
-| `internal/ble` | BLE adapter, discovery, connection + AT I/O (GUI-free) |
-| `internal/config` | config dir, atomic writes, legacy-dir migration |
-| `internal/device` | device template parsing and preset loading |
-| `internal/filter` | shared regex/substring filter |
-| `internal/history` | per-device command history persistence |
-| `internal/otanb` | Dragino NB bootloader flash protocol (frames, CRC, upgrade sequence) |
-| `internal/playbook` | playbook persistence, text format, risky-command detection |
-| `internal/session` | session persistence |
-| `assets/icon.svg` | editable icon source (regen: `go run ./tools/genicon`) |
+| `apps/aircord` | the binary: migrates a pre-rename config dir, opens the stores, starts the radio, opens the window |
+| `crates/ble` | `aircord-ble`: the `Link` over btleplug (CoreBluetooth, BlueZ, WinRT) on its own tokio runtime; UART profiles |
+| `crates/core` | `aircord-core`: GUI-free logic, see below |
+| `crates/core/presets/` | device templates shipped inside the binary |
+| `crates/core/testdata/` | captured S31-NB output used by the parser tests |
+| `crates/ui` | `aircord-ui`: the egui window, dialogs and the guided view |
+| `crates/ui/assets/fonts/` | embedded Inter and JetBrains Mono |
+| `assets/icon.svg` | editable icon source; `assets/icon.png` is rendered from it |
+
+`crates/core/src`:
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `link`, `link/fake` | the `Link` trait the rest of the app talks to; a scripted fake device for tests |
+| `lines` | notify chunks reassembled into lines; taps that let a run wait for a reply |
+| `config` | config dir, atomic writes, legacy-dir migration |
+| `device` | device template parsing and preset loading |
+| `settings`, `cfg`, `transfer` | typed settings, the `AT+CFG` parser, sending only the changes and verifying them |
+| `banner` | status lines a Dragino NB node prints by itself (IMEI, signal, uploads) |
+| `playbook` | playbook persistence, text format, risky-command detection, runner |
+| `session` | session persistence |
+| `history` | per-device command history persistence |
+| `filter`, `scan` | shared regex/substring filter; device table sort order |
+| `ota`, `otanb` | firmware update flow; Dragino NB bootloader protocol (frames, CRC, upgrade sequence) |
+| `redact` | password masking in logs, transcript and screen |
+| `slug` | safe file names from user-given names |
+
+`crates/ui/src`:
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `lib` | the `App`: layout, scan/connect flow, terminal, status bar, history picker |
+| `inbox` | messages from the radio and the jobs to the window's thread |
+| `guided` | guided view: device cards, status card, settings form (German) |
+| `form`, `xfer` | settings form state; transferring the changes, with review and progress |
+| `panel` | control panel rendered from a device template |
+| `playbooks`, `sessions`, `firmware` | the Playbooks, Sessions and firmware update dialogs |
+| `confirm`, `dialog` | confirmations before destructive actions; native file dialogs |
+| `style`, `widgets`, `icons` | theme (light/dark), shared widgets, icon drawings |
+| `tests` | the window driven as a user would (egui_kittest) over the fake link |
 
 ## Contributing
 
