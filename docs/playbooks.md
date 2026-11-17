@@ -80,8 +80,21 @@ It is a starting point, not a default to trust blindly — verify the AT syntax
 against your device's firmware manual. The uplink interval (`AT+TDC=900`, 15
 minutes) is the value most worth adjusting before first use.
 
+## Import and export
+
+**Export** next to a playbook writes it to a `.json` file of your choice.
+**Import…** below the list reads such a file and stores it, so a playbook can
+be handed to a colleague or kept under version control.
+
+An import is checked before it is stored: it needs a name, at least one step,
+and a command in every step. A file that fails is refused with the reason, and
+nothing is saved. If a playbook of the same name already exists, Aircord asks
+before replacing it.
+
 ## Storage
 
-Playbooks are JSON files under `<config>/aircord/playbooks/`, one per playbook.
-They are portable: copying a file into that directory on another machine makes
-the playbook appear there.
+Playbooks are JSON files under `<config>/aircord/playbooks/`, one per playbook,
+in the same format Export writes. Prefer Import over copying a file into that
+directory by hand: the file name has to match the playbook's name (lower-case,
+other characters turned into `-`), and a file that does not is listed but
+cannot be run.

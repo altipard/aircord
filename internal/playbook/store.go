@@ -16,6 +16,7 @@ package playbook
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -73,8 +74,55 @@ func slug(name string) string {
 	return s
 }
 
+// FileName is the file a playbook is stored under, and the name an export
+// suggests, so an exported file dropped into the store dir is found again.
+func FileName(name string) string { return slug(name) + ".json" }
+
 func (s *Store) path(name string) string {
-	return filepath.Join(s.dir, slug(name)+".json")
+	return filepath.Join(s.dir, FileName(name))
+}
+
+// Encode renders a playbook in the on-disk format, which is also the exchange
+// format for export.
+func Encode(pb Playbook) ([]byte, error) {
+	return json.MarshalIndent(pb, "", "  ")
+}
+
+// Decode parses and validates an imported playbook. Unlike Load it rejects
+// anything the editor could not have produced — a blank name, no steps, a step
+// without a command, a negative pause — because an imported file comes from
+// outside and a silently half-usable playbook is worse than a clear refusal.
+func Decode(data []byte) (Playbook, error) {
+	var pb Playbook
+	if err := json.Unmarshal(data, &pb); err != nil {
+		return Playbook{}, fmt.Errorf("not a playbook file: %w", err)
+	}
+	pb.Name = strings.TrimSpace(pb.Name)
+	if pb.Name == "" {
+		return Playbook{}, errors.New("playbook has no name")
+	}
+	if len(pb.Steps) == 0 {
+		return Playbook{}, errors.New("playbook has no steps")
+	}
+	for i := range pb.Steps {
+		st := &pb.Steps[i]
+		st.Cmd = strings.TrimSpace(st.Cmd)
+		if st.Cmd == "" {
+			return Playbook{}, fmt.Errorf("step %d has no command", i+1)
+		}
+		if st.WaitMs < 0 {
+			return Playbook{}, fmt.Errorf("step %d has a negative pause", i+1)
+		}
+	}
+	return pb, nil
+}
+
+// Exists reports whether a playbook with the given name is stored.
+func (s *Store) Exists(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := os.Stat(s.path(name))
+	return err == nil
 }
 
 // Save writes a playbook, overwriting any with the same name. Name is required.
@@ -82,7 +130,7 @@ func (s *Store) Save(pb Playbook) error {
 	if strings.TrimSpace(pb.Name) == "" {
 		return errors.New("playbook name is required")
 	}
-	b, err := json.MarshalIndent(pb, "", "  ")
+	b, err := Encode(pb)
 	if err != nil {
 		return err
 	}
@@ -235,10 +283,7 @@ func AwaitMatch(lines <-chan string, re *regexp.Regexp, timeout time.Duration, c
 // shipped defaults never overwrite a user's edits (or their deletion is
 // respected only until the next start — deleting a default brings it back).
 func (s *Store) EnsureDefault(pb Playbook) {
-	s.mu.Lock()
-	_, err := os.Stat(s.path(pb.Name))
-	s.mu.Unlock()
-	if err == nil {
+	if s.Exists(pb.Name) {
 		return
 	}
 	_ = s.Save(pb)

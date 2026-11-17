@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/altipard/aircord/internal/playbook"
@@ -28,6 +31,95 @@ const playbookSyntax = "one command per line\n" +
 	"?PATTERN   wait for a matching reply   (bare ? = OK)\n" +
 	"@MS        pause afterwards\n" +
 	"#          comment"
+
+// playbookImportLimit caps how much of a chosen file is read. A real playbook
+// is a few hundred bytes; anything near the cap is not one.
+const playbookImportLimit = 1 << 20
+
+// importPlaybook lets the user pick a playbook file and stores it. It goes
+// through Store.Save rather than copying the file, so the stored file name
+// always matches the playbook's name — a mismatched file is listed but cannot
+// be loaded. An existing playbook of the same name is only replaced after a
+// confirmation. done runs on the UI thread with the imported name.
+func (s *scanner) importPlaybook(msg *alertLine, done func(name string)) {
+	fd := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+		if err != nil {
+			msg.fail("import failed: " + err.Error())
+			return
+		}
+		if r == nil {
+			return // cancelled
+		}
+		defer func() { _ = r.Close() }()
+		data, err := io.ReadAll(io.LimitReader(r, playbookImportLimit+1))
+		if err != nil {
+			msg.fail("import failed: " + err.Error())
+			return
+		}
+		if len(data) > playbookImportLimit {
+			msg.fail("import failed: " + r.URI().Name() + " is too large for a playbook")
+			return
+		}
+		pb, err := playbook.Decode(data)
+		if err != nil {
+			msg.fail("import failed: " + err.Error())
+			return
+		}
+		save := func() {
+			if err := s.plays.Save(pb); err != nil {
+				msg.fail("import failed: " + err.Error())
+				return
+			}
+			msg.ok(fmt.Sprintf("imported: %s  ·  %d steps", pb.Name, len(pb.Steps)))
+			done(pb.Name)
+		}
+		if !s.plays.Exists(pb.Name) {
+			save()
+			return
+		}
+		s.confirm("Replace playbook?",
+			"A playbook named \""+pb.Name+"\" already exists.\n\nReplace it with the imported one?",
+			save)
+	}, s.win)
+	fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+	fd.Show()
+}
+
+// exportPlaybook writes a stored playbook to a file the user picks, in the same
+// format Import reads.
+func (s *scanner) exportPlaybook(name string, msg *alertLine) {
+	pb, err := s.plays.Load(name)
+	if err != nil {
+		msg.fail("export failed: " + err.Error())
+		return
+	}
+	data, err := playbook.Encode(pb)
+	if err != nil {
+		msg.fail("export failed: " + err.Error())
+		return
+	}
+	fd := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
+		if err != nil {
+			msg.fail("export failed: " + err.Error())
+			return
+		}
+		if w == nil {
+			return // cancelled
+		}
+		_, werr := w.Write(data)
+		if cerr := w.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			msg.fail("export failed: " + werr.Error())
+			return
+		}
+		msg.ok("exported: " + name + " → " + w.URI().Name())
+	}, s.win)
+	fd.SetFileName(playbook.FileName(name))
+	fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+	fd.Show()
+}
 
 // runPlaybook replays a playbook's steps in order on a background goroutine.
 // A step with WaitFor blocks until the device reply matches (or the run aborts
@@ -200,6 +292,8 @@ func (s *scanner) playbookBody(close func()) fyne.CanvasObject {
 				}
 			})
 
+			export := widget.NewButton("Export", func() { s.exportPlaybook(n, msg) })
+
 			del := widget.NewButton("Delete", func() {
 				s.confirm("Delete playbook?",
 					"Delete the playbook \""+n+"\"?\n\nThis cannot be undone.",
@@ -216,12 +310,16 @@ func (s *scanner) playbookBody(close func()) fyne.CanvasObject {
 
 			row := container.NewBorder(nil, nil,
 				widget.NewLabel(caption),
-				container.NewHBox(run, edit, del))
+				container.NewHBox(run, edit, export, del))
 			listBox.Add(row)
 		}
 		listBox.Refresh()
 	}
 	refresh()
+
+	importBtn := widget.NewButton("Import…", func() {
+		s.importPlaybook(msg, func(string) { refresh() })
+	})
 
 	saveBtn := widget.NewButton("Save", func() {
 		name := strings.TrimSpace(nameEntry.Text)
@@ -250,7 +348,9 @@ func (s *scanner) playbookBody(close func()) fyne.CanvasObject {
 		editor,
 	))
 	tabs = container.NewAppTabs(
-		container.NewTabItem("Saved", container.NewVScroll(listBox)),
+		container.NewTabItem("Saved", container.NewBorder(
+			nil, container.NewHBox(importBtn), nil, nil,
+			container.NewVScroll(listBox))),
 		editorTab,
 	)
 	// The alert sits outside the tabs so a message raised on one is still

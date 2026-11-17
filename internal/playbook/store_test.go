@@ -165,3 +165,61 @@ func TestEnsureDefaultDoesNotOverwrite(t *testing.T) {
 		t.Fatalf("EnsureDefault should create missing playbook: %v", err)
 	}
 }
+
+func TestEncodeDecodeRoundTrip(t *testing.T) {
+	want := Playbook{
+		Name:  "dragino-nb-1nce",
+		Steps: ParseSteps("AT+APN=iot.1nce.net ?OK\nAT+TDC=900 ?OK @1500\nATZ"),
+	}
+	b, err := Encode(want)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	got, err := Decode(b)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestDecodeRejectsUnusablePlaybooks(t *testing.T) {
+	cases := map[string]string{
+		"not json":       `AT+CFG`,
+		"blank name":     `{"name":"  ","steps":[{"cmd":"AT"}]}`,
+		"no steps":       `{"name":"x","steps":[]}`,
+		"empty command":  `{"name":"x","steps":[{"cmd":"AT"},{"cmd":" "}]}`,
+		"negative pause": `{"name":"x","steps":[{"cmd":"AT","waitMs":-1}]}`,
+	}
+	for name, in := range cases {
+		if _, err := Decode([]byte(in)); err == nil {
+			t.Errorf("%s: Decode accepted %s", name, in)
+		}
+	}
+}
+
+// TestImportedFileNameMatchesStore guards the reason import goes through Save:
+// a file stored under any other name is listed but cannot be loaded.
+func TestImportedFileNameMatchesStore(t *testing.T) {
+	s := tempStore(t)
+	pb, err := Decode([]byte(`{"name":"Mein Playbook","steps":[{"cmd":"AT+CFG"}]}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if s.Exists(pb.Name) {
+		t.Fatal("Exists before Save")
+	}
+	if err := s.Save(pb); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !s.Exists(pb.Name) {
+		t.Fatal("Exists after Save")
+	}
+	if _, err := s.Load(pb.Name); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := FileName(pb.Name); got != "mein-playbook.json" {
+		t.Fatalf("FileName = %q", got)
+	}
+}
