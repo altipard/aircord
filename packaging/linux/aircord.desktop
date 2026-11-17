@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Aircord
+GenericName=Bluetooth Serial Console
+Comment=The serial console for devices that no longer have a serial port
+Exec=aircord
+Icon=aircord
+Terminal=false
+Categories=Development;Utility;
+Keywords=BLE;Bluetooth;serial;console;UART;
+# eframe uses the app name as the X11 class / Wayland app_id.
+StartupWMClass=Aircord

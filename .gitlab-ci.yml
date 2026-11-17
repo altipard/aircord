@@ -4,65 +4,70 @@
 # package  runs on tags: native packages per platform
 # release  runs on tags: creates the GitLab Release
 #
-# Packaging is native per platform — Fyne cross-compilation needs a CGO
-# toolchain per target, which is more machinery than it is worth here. The Linux
-# package builds on the shared runners everyone has. macOS and Windows need
-# GitLab SaaS runners, which are opt-in per project, so those jobs are manual:
-# start them from the pipeline view once the tag is pushed. See README for which
-# platforms are actually runtime-tested.
+# Packaging is native per platform (packaging/package.sh). Cross-compiling the
+# window and BLE stacks needs each target's SDK, which is more machinery than it
+# is worth here. The Linux package builds on the shared runners everyone has.
+# macOS and Windows need GitLab SaaS runners, which are opt-in per project, so
+# those jobs are manual: start them from the pipeline view once the tag is
+# pushed. See README for which platforms are actually runtime-tested.
 
 stages: [check, package, release]
 
 variables:
-  GO_VERSION: "1.25"
-  GOPATH: $CI_PROJECT_DIR/.go
-  GOTOOLCHAIN: local
+  # The workspace's rust-version: CI proves the MSRV, not just the latest stable.
+  RUST_VERSION: "1.95"
+  CARGO_BUNDLE_VERSION: "0.12.0"
   # Where tagged packages are published, and where the release links point.
   PKG_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aircord/${CI_COMMIT_TAG}"
 
-.go-linux:
-  image: golang:${GO_VERSION}-bookworm
+.rust-linux:
+  image: rust:${RUST_VERSION}-bookworm
+  variables:
+    # Inside the project dir, so the registry can be cached.
+    CARGO_HOME: $CI_PROJECT_DIR/.cargo
   before_script:
-    # Fyne needs OpenGL and X11 headers to compile on Linux.
+    # btleplug links libdbus (BlueZ); eframe's window stack wants the X11,
+    # Wayland, xkbcommon and GL development files.
     - apt-get update -qq
-    - apt-get install -y -qq libgl1-mesa-dev xorg-dev >/dev/null
+    - >-
+      apt-get install -y -qq pkg-config libdbus-1-dev libxkbcommon-dev
+      libgl1-mesa-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+      >/dev/null
   cache:
-    key: "go-mod-$CI_COMMIT_REF_SLUG"
+    key:
+      files: [Cargo.lock]
+      prefix: $CI_JOB_NAME
     paths:
-      - .go/pkg/mod
+      - .cargo/registry/index
+      - .cargo/registry/cache
+      - .cargo/git/db
+      - target/
 
+# fmt and clippy on stable: lints are added and changed with every release, so
+# an older clippy flags code the current one accepts. Developers run
+# `task check` on stable; CI lints with the same rules. Build and test stay on
+# RUST_VERSION to prove the MSRV.
 fmt:
-  extends: .go-linux
+  image: rust:bookworm
   stage: check
   script:
-    # Only tracked files — the module cache lives under .go/ in the project dir.
-    - unformatted=$(git ls-files '*.go' | xargs -r gofmt -l)
-    - test -z "$unformatted" || { echo 'gofmt needed:'; echo "$unformatted"; exit 1; }
+    - rustup component add rustfmt
+    - cargo fmt --all --check
 
-vet:
-  extends: .go-linux
+clippy:
+  extends: .rust-linux
+  image: rust:bookworm
   stage: check
   script:
-    - go vet ./...
+    - rustup component add clippy
+    - cargo clippy --workspace --all-targets --locked -- -D warnings
 
 test:
-  extends: .go-linux
+  extends: .rust-linux
   stage: check
   script:
-    - go test ./...
-
-build:
-  extends: .go-linux
-  stage: check
-  script:
-    - go build ./...
-
-lint:
-  extends: .go-linux
-  stage: check
-  script:
-    - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
-  allow_failure: true
+    - cargo build --workspace --locked
+    - cargo test --workspace --locked
 
 # ---------------------------------------------------------------- packaging --
 
@@ -72,15 +77,14 @@ lint:
 
 package:linux:
   extends:
-    - .go-linux
+    - .rust-linux
     - .package-rules
   stage: package
   variables:
     ASSET: "aircord-linux-amd64.tar.xz"
+    AIRCORD_TAG: $CI_COMMIT_TAG
   script:
-    - go install fyne.io/tools/cmd/fyne@latest
-    - $GOPATH/bin/fyne package
-    - mkdir -p dist && mv ./*.tar.xz "dist/${ASSET}"
+    - bash packaging/package.sh
     - |
       curl --fail --silent --show-error \
         --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
@@ -101,14 +105,14 @@ package:macos:
   allow_failure: true
   variables:
     ASSET: "aircord-macos-arm64.app.zip"
+    AIRCORD_TAG: $CI_COMMIT_TAG
   before_script:
-    - brew install go@${GO_VERSION} || brew install go
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}"
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - cargo install cargo-bundle --locked --version "${CARGO_BUNDLE_VERSION}"
   script:
-    - go install fyne.io/tools/cmd/fyne@latest
-    - "$(go env GOPATH)/bin/fyne package"
-    # The .app is unsigned; users right-click -> Open on first launch.
-    - mkdir -p dist
-    - ditto -c -k --keepParent ./*.app "dist/${ASSET}"
+    # The .app carries only an ad-hoc signature; users right-click -> Open on first launch.
+    - bash packaging/package.sh
     - |
       curl --fail --silent --show-error \
         --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
@@ -119,7 +123,8 @@ package:macos:
     expire_in: 30 days
 
 # Needs GitLab SaaS Windows runners enabled for the project. Unverified at
-# runtime — see README.
+# runtime — see README. PowerShell, so the release binary is copied here
+# directly instead of through packaging/package.sh.
 package:windows:
   extends: .package-rules
   stage: package
@@ -129,11 +134,21 @@ package:windows:
   variables:
     ASSET: "aircord-windows-amd64.exe"
   script:
-    - choco install golang --version=$env:GO_VERSION -y --no-progress
-    - go install fyne.io/tools/cmd/fyne@latest
-    - fyne package
+    # Cmdlet errors (download, hash) must fail the job, not just print.
+    - $ErrorActionPreference = 'Stop'
+    - $rustup = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+    - Invoke-WebRequest -Uri $rustup -OutFile rustup-init.exe
+    - Invoke-WebRequest -Uri "$rustup.sha256" -OutFile rustup-init.exe.sha256
+    # Run the installer only if it matches the published checksum.
+    - |
+      $expected = ((Get-Content rustup-init.exe.sha256 -Raw).Trim() -split '\s+')[0].ToLower()
+      $actual = (Get-FileHash rustup-init.exe -Algorithm SHA256).Hash.ToLower()
+      if ($actual -ne $expected) { throw "rustup-init.exe checksum mismatch: expected $expected, got $actual" }
+    - ./rustup-init.exe -y --profile minimal --default-toolchain $env:RUST_VERSION
+    - $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
+    - cargo build --release --locked -p aircord
     - New-Item -ItemType Directory -Force -Path dist
-    - Move-Item ./*.exe "dist/$env:ASSET"
+    - Copy-Item target/release/aircord.exe "dist/$env:ASSET"
     - |
       curl.exe --fail --silent --show-error `
         --header "JOB-TOKEN: $env:CI_JOB_TOKEN" `
@@ -158,12 +173,15 @@ release:
   release:
     tag_name: $CI_COMMIT_TAG
     name: "Aircord $CI_COMMIT_TAG"
+    # Only the Linux package is guaranteed: macOS and Windows are manual jobs
+    # the release does not wait for, so they get no links that could 404.
     description: |
-      Packages for this release are in the
-      [package registry]($CI_PROJECT_URL/-/packages).
+      The Linux package (amd64, .tar.xz) is linked below. macOS and Windows
+      packages are built by manual pipeline jobs; once those have run, they
+      are in the [package registry]($CI_PROJECT_URL/-/packages) under this tag.
 
       The macOS app is unsigned — right-click → *Open* on first launch.
-      Linux and Windows builds are provided but their runtime is unverified.
+      The runtime of the Linux and Windows builds is unverified.
     assets:
       links:
         - name: "Linux (amd64, .tar.xz)"

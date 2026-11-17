@@ -1,0 +1,2 @@
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Aircord connects to your devices over Bluetooth Low Energy to open their serial console.</string>
