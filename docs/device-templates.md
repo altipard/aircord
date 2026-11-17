@@ -225,7 +225,9 @@ on it:
    a stop ends the transfer; the rest is reported as not sent.
 5. It then reads `AT+CFG` again and reports each field as verified, different
    (the device kept another value), failed (refused or not sent), or unverified
-   (the read-back did not show it or could not be read).
+   (the read-back did not show it or could not be read). The read-back must
+   contain settings but not necessarily `AT+MODEL`; only the first read needs
+   the model, to pick the template.
 6. When a change that may have been taken (verified or unverified) has
    `needs_reboot`, the outcome says a restart is due and
    `Template::reboot_action` names the template's restart (a `button` with

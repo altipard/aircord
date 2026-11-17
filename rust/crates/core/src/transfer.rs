@@ -259,7 +259,8 @@ fn collect(tap: &Tap, idle: Duration, total: Duration, stop: &AtomicBool) -> (Ve
     }
 }
 
-fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Result<Cfg, String> {
+/// Reads one `AT+CFG` dump. A dump without settings is always an error; one without `AT+MODEL` only with `need_model`.
+fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, need_model: bool, stop: &AtomicBool) -> Result<Cfg, String> {
     if !link.is_connected() {
         return Err("Keine Verbindung zum Gerät.".into());
     }
@@ -271,7 +272,7 @@ fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Res
             let cfg = Cfg::parse(lines.iter().map(String::as_str).chain(["OK"]));
             if cfg.is_empty() {
                 Err(format!("{READ_CMD} hat keine Einstellungen geliefert."))
-            } else if cfg.model.is_none() {
+            } else if need_model && cfg.model.is_none() {
                 Err(format!("{READ_CMD} nennt kein Gerätemodell (AT+MODEL fehlt)."))
             } else {
                 Ok(cfg)
@@ -287,7 +288,7 @@ fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Res
 /// Sends `AT+CFG` and reads the dump. A dump without settings or without its `AT+MODEL` line is an error: it is not
 /// the device's state, and without the model no template can be chosen. Waits: call it from a job's thread.
 pub fn read_cfg(link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Result<Cfg, String> {
-    read_on(&link.lines(), link, wait, stop)
+    read_on(&link.lines(), link, wait, true, stop)
 }
 
 /// What became of one set command before the read-back.
@@ -313,7 +314,8 @@ fn settle(tap: &Tap, d: Duration, stop: &AtomicBool) {
 }
 
 /// Sends each change (planned with `tpl` by [`plan`]) and checks its reply, then reads `AT+CFG` again and reports every
-/// change. A refused change does not stop the others, they are independent settings; a lost link or `stop` does, and
+/// change. The read-back must hold settings but need not repeat `AT+MODEL`: the template was chosen before, and each
+/// change is judged by its own key. A refused change does not stop the others, they are independent settings; a lost link or `stop` does, and
 /// the rest are reported as not sent. A change that got no answer is judged by the read-back like the others, since the
 /// device may well have taken it; after such a silence the transfer waits a moment and discards a late reply. Secrets
 /// go out through [`Link::send_secret`], so their echo is masked, no result carries their value, and the read-back
@@ -369,7 +371,7 @@ pub fn apply(
     }
     let readback = if sent.iter().any(|s| !matches!(s, Sent::Failed(_))) {
         report(Progress::Verifying);
-        Some(read_on(&tap, link, wait, stop))
+        Some(read_on(&tap, link, wait, false, stop))
     } else {
         None
     };
@@ -667,6 +669,20 @@ mod tests {
         let out = apply(&cut, &s31_template(), &changes, Duration::from_millis(40), &AtomicBool::new(false), &mut |_| {});
         assert_eq!(out.fields[0].status, Status::Unverified { why: "Keine vollständige Antwort auf AT+CFG.".into() });
         assert!(out.readback.is_none());
+    }
+
+    #[test]
+    fn a_read_back_without_its_model_line_still_verifies() {
+        let link = device();
+        let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
+        link.reply("AT+CFG", &["AT+TDC=1800", "AT+SHTEMP=20,30", "OK"]);
+        let (out, _) = run(&link, &changes);
+        assert_eq!(out.fields.iter().map(|f| &f.status).collect::<Vec<_>>(), [&Status::Verified, &Status::Verified]);
+        assert_eq!(out.readback.as_ref().and_then(|c| c.model.as_deref()), None);
+
+        link.reply("AT+CFG", &["OK"]);
+        let (out, _) = run(&link, &changes);
+        assert_eq!(out.fields[0].status, Status::Unverified { why: "AT+CFG hat keine Einstellungen geliefert.".into() });
     }
 
     #[test]
