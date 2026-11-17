@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use aircord_core::lines::{Tap, Taps, append_lines};
 use aircord_core::link::{Device, Events, Link, mask, summarize_line};
-use aircord_core::redact::redact_line;
+use aircord_core::redact::{Direction, log_line};
 use btleplug::api::{Central, CentralEvent, CharPropFlags, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::StreamExt;
@@ -103,8 +103,7 @@ impl BleLink {
         if !self.is_connected() {
             return false;
         }
-        // The echo goes to the log: a password typed or sent as a setting must not land in a saved transcript.
-        let echo = redact_line(&echo, &[]).into_owned();
+        // The echo goes to the log through log_line, which masks a password typed or sent as a setting.
         self.writes.send(Write { data, echo, done }).is_ok()
     }
 }
@@ -182,7 +181,7 @@ async fn writer(shared: Arc<Shared>, mut queue: mpsc::UnboundedReceiver<Write>) 
         let result = match shared.write_target() {
             None => Err("ble: not connected".to_string()),
             Some((p, ch)) => {
-                shared.events.log(&format!(">> {}", w.echo));
+                shared.events.log(&log_line(Direction::Sent, &w.echo));
                 let kind = if ch.properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE) {
                     WriteType::WithoutResponse
                 } else {
@@ -266,7 +265,7 @@ async fn notifications(
         }
         for line in append_lines(&mut buf, &n.value) {
             // AT+CFG prints AT+PWORD in clear; the tap still gets the real line, the log a masked one.
-            shared.events.log(&format!("<< {}", redact_line(&line, &[])));
+            shared.events.log(&log_line(Direction::Received, &line));
             shared.taps.feed(&line);
         }
     }

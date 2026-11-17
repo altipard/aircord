@@ -10,7 +10,7 @@ use crate::cfg::setting_line;
 use crate::lines::{Tap, Taps, lock};
 use crate::link::{Device, Events, Link, mask, summarize_line};
 use crate::otanb::FakeBootloader;
-use crate::redact::redact_line;
+use crate::redact::{Direction, log_line, redact_line};
 
 /// Events that go nowhere.
 pub struct NoEvents;
@@ -46,6 +46,8 @@ struct State {
     drops: BTreeSet<String>,
     /// Replies by exact command that come only after a delay, from another thread.
     late: BTreeMap<String, (Duration, Vec<String>)>,
+    /// The thread of the latest late reply; the next one waits for it, so late replies keep the order of their commands.
+    late_last: Option<std::thread::JoinHandle<()>>,
 }
 
 /// The fake link. Everything happens inline, on the caller's thread.
@@ -107,7 +109,8 @@ impl FakeLink {
         lock(&self.state).drops.insert(key.into());
     }
 
-    /// `cmd` is answered with `lines`, but only `after` it was sent.
+    /// `cmd` is answered with `lines`, but only `after` it was sent, and never before the late reply of a command sent
+    /// earlier: a serial console answers in order.
     pub fn reply_late(&self, cmd: &str, after: Duration, lines: &[&str]) {
         lock(&self.state).late.insert(cmd.into(), (after, lines.iter().map(|l| l.to_string()).collect()));
     }
@@ -213,7 +216,7 @@ impl FakeLink {
     fn deliver(&self, replies: Vec<String>, resets: bool) {
         let events = self.events();
         for r in replies {
-            events.log(&format!("<< {}", redact_line(&r, &[])));
+            events.log(&log_line(Direction::Received, &r));
             self.taps.feed(&r);
         }
         if resets {
@@ -223,26 +226,30 @@ impl FakeLink {
 
     /// Sends `line`; the log and [`FakeLink::sent`] get `echo` with its passwords masked, as the real link logs it.
     fn write(&self, line: &str, echo: &str) -> bool {
-        let echo = redact_line(echo, &[]);
         {
             let mut s = lock(&self.state);
             if s.connected.is_none() {
                 return false;
             }
-            s.sent.push(echo.to_string());
+            s.sent.push(redact_line(echo, &[]).into_owned());
         }
-        self.events().log(&format!(">> {echo}"));
+        self.events().log(&log_line(Direction::Sent, echo));
         let (replies, resets) = self.answer(line);
         let late = lock(&self.state).late.get(line.trim_end_matches(['\r', '\n'])).cloned();
         if let Some((after, lines)) = late {
             let (taps, events) = (self.taps.clone(), self.events());
-            std::thread::spawn(move || {
+            let earlier = lock(&self.state).late_last.take();
+            let handle = std::thread::spawn(move || {
                 std::thread::sleep(after);
+                if let Some(earlier) = earlier {
+                    let _ = earlier.join();
+                }
                 for l in lines {
-                    events.log(&format!("<< {}", redact_line(&l, &[])));
+                    events.log(&log_line(Direction::Received, &l));
                     taps.feed(&l);
                 }
             });
+            lock(&self.state).late_last = Some(handle);
         }
         self.deliver(replies, resets);
         true

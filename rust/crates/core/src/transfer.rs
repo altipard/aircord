@@ -5,7 +5,7 @@
 //!
 //! Like a playbook run, [`apply`] waits on the link: call it from a job's thread.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -91,19 +91,49 @@ pub struct FieldError {
 /// current one is no change and is not checked, so a device value outside the template's rules never blocks the
 /// others. A setting hidden by its `visible_if` (with the wanted values over the current ones) is left out. A key the
 /// template lacks, or that the device did not report, is an error, as is any value [`crate::settings::Setting::check`]
-/// refuses; every error is returned, not just the first. Leave out what the person did not touch: an untouched secret
-/// passed as `""` is a change to empty, which is refused, because an empty value is never sent.
+/// refuses; every error is returned, not just the first.
+///
+/// An empty secret means "unchanged", never "clear": a password field starts empty because the old value is not shown,
+/// so an untouched one must not wipe the device's password. A secret is cleared only through [`plan_clearing`]. An
+/// empty value for a `clearable` setting that is not secret clears it, as before.
 pub fn plan(tpl: &Template, current: &Cfg, wanted: &BTreeMap<String, String>) -> Result<Vec<Change>, Vec<FieldError>> {
+    plan_clearing(tpl, current, wanted, &BTreeSet::new())
+}
+
+/// [`plan`], plus `clear`: the keys the person explicitly asked to empty (a "Löschen" button, not an empty field).
+/// Each goes out as `AT+<KEY>=NULL` unless the device already has it empty; this is the only way to clear a secret. A
+/// key in `clear` must be a `clearable` setting of the template, else it is an error. A key both in `wanted` and in
+/// `clear` is cleared.
+pub fn plan_clearing(
+    tpl: &Template,
+    current: &Cfg,
+    wanted: &BTreeMap<String, String>,
+    clear: &BTreeSet<String>,
+) -> Result<Vec<Change>, Vec<FieldError>> {
     let mut errors = Vec::new();
-    for key in wanted.keys().filter(|k| tpl.setting(k).is_none()) {
+    let unknown: BTreeSet<&String> = wanted.keys().chain(clear).filter(|k| tpl.setting(k).is_none()).collect();
+    for key in unknown {
         errors.push(FieldError { key: key.clone(), label: key.clone(), message: "Diese Einstellung kennt die Vorlage nicht.".into() });
     }
-    let value_of = |k: &str| wanted.get(k).map(String::as_str).or_else(|| current.get(k));
+    let value_of = |k: &str| if clear.contains(k) { Some("") } else { wanted.get(k).map(String::as_str).or_else(|| current.get(k)) };
     let mut changes = Vec::new();
     for s in &tpl.settings {
-        let Some(want) = wanted.get(&s.key) else { continue };
+        let clearing = clear.contains(&s.key);
+        let want = if clearing {
+            ""
+        } else {
+            match wanted.get(&s.key) {
+                Some(w) if s.is_secret() && w.trim().is_empty() => continue,
+                Some(w) => w.as_str(),
+                None => continue,
+            }
+        };
         let error = |message: String| FieldError { key: s.key.clone(), label: s.label.clone(), message };
         if !s.visible(value_of) {
+            continue;
+        }
+        if clearing && !s.clearable {
+            errors.push(error("Diese Einstellung kann nicht geleert werden.".into()));
             continue;
         }
         let Some(have) = current.get(&s.key) else {
@@ -229,7 +259,8 @@ fn collect(tap: &Tap, idle: Duration, total: Duration, stop: &AtomicBool) -> (Ve
     }
 }
 
-fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Result<Cfg, String> {
+/// Reads one `AT+CFG` dump. A dump without settings is always an error; one without `AT+MODEL` only with `need_model`.
+fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, need_model: bool, stop: &AtomicBool) -> Result<Cfg, String> {
     if !link.is_connected() {
         return Err("Keine Verbindung zum Gerät.".into());
     }
@@ -241,7 +272,7 @@ fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Res
             let cfg = Cfg::parse(lines.iter().map(String::as_str).chain(["OK"]));
             if cfg.is_empty() {
                 Err(format!("{READ_CMD} hat keine Einstellungen geliefert."))
-            } else if cfg.model.is_none() {
+            } else if need_model && cfg.model.is_none() {
                 Err(format!("{READ_CMD} nennt kein Gerätemodell (AT+MODEL fehlt)."))
             } else {
                 Ok(cfg)
@@ -257,7 +288,7 @@ fn read_on(tap: &Tap, link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Res
 /// Sends `AT+CFG` and reads the dump. A dump without settings or without its `AT+MODEL` line is an error: it is not
 /// the device's state, and without the model no template can be chosen. Waits: call it from a job's thread.
 pub fn read_cfg(link: &dyn Link, wait: Duration, stop: &AtomicBool) -> Result<Cfg, String> {
-    read_on(&link.lines(), link, wait, stop)
+    read_on(&link.lines(), link, wait, true, stop)
 }
 
 /// What became of one set command before the read-back.
@@ -283,7 +314,8 @@ fn settle(tap: &Tap, d: Duration, stop: &AtomicBool) {
 }
 
 /// Sends each change (planned with `tpl` by [`plan`]) and checks its reply, then reads `AT+CFG` again and reports every
-/// change. A refused change does not stop the others, they are independent settings; a lost link or `stop` does, and
+/// change. The read-back must hold settings but need not repeat `AT+MODEL`: the template was chosen before, and each
+/// change is judged by its own key. A refused change does not stop the others, they are independent settings; a lost link or `stop` does, and
 /// the rest are reported as not sent. A change that got no answer is judged by the read-back like the others, since the
 /// device may well have taken it; after such a silence the transfer waits a moment and discards a late reply. Secrets
 /// go out through [`Link::send_secret`], so their echo is masked, no result carries their value, and the read-back
@@ -339,7 +371,7 @@ pub fn apply(
     }
     let readback = if sent.iter().any(|s| !matches!(s, Sent::Failed(_))) {
         report(Progress::Verifying);
-        Some(read_on(&tap, link, wait, stop))
+        Some(read_on(&tap, link, wait, false, stop))
     } else {
         None
     };
@@ -510,6 +542,52 @@ mod tests {
         assert_eq!(apn[0].message, "Bitte einen Wert eingeben.", "the APN cannot be cleared");
     }
 
+    /// An S31-NB on MQTT with a password set: the MQTT fields are visible.
+    fn mqtt_dump() -> String {
+        S31.replace("AT+PRO=2,5", "AT+PRO=3,5").replace("AT+PWD=NULL", "AT+PWD=mqtt-alt")
+    }
+
+    #[test]
+    fn a_password_field_left_empty_keeps_the_password() {
+        let dump = mqtt_dump();
+        let link = FakeLink::configured("A", "x", &dump);
+        link.connect("A");
+        let tpl = s31_template();
+        let changes = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("PWD", ""), ("TDC", "1800")])).unwrap();
+        assert_eq!(changes.iter().map(Change::cmd).collect::<Vec<_>>(), ["AT+TDC=1800"]);
+        let (out, _) = run(&link, &changes);
+        assert!(out.all_verified(), "{:?}", out.fields);
+        assert!(!link.sent().iter().any(|c| c.starts_with("AT+PWD")), "{:?}", link.sent());
+        assert_eq!(link.cfg_value("PWD").as_deref(), Some("mqtt-alt"));
+        let blank = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("PWD", "   ")])).unwrap();
+        assert!(blank.is_empty(), "spaces are empty too");
+    }
+
+    #[test]
+    fn only_an_explicit_clear_empties_a_secret() {
+        let dump = mqtt_dump();
+        let link = FakeLink::configured("A", "x", &dump);
+        link.connect("A");
+        let tpl = s31_template();
+        let cfg = Cfg::parse_text(&dump);
+        let clear: BTreeSet<String> = ["PWD".to_string()].into();
+        let changes = plan_clearing(&tpl, &cfg, &want(&[("PWD", "neu"), ("TDC", "1800")]), &clear).unwrap();
+        assert_eq!(changes.iter().map(Change::cmd).collect::<Vec<_>>(), ["AT+PWD=NULL", "AT+TDC=1800"], "the clear wins");
+        assert_eq!(changes[0].shown_cmd(), "AT+PWD=******");
+        let (out, _) = run(&link, &changes);
+        assert!(out.all_verified(), "{:?}", out.fields);
+        assert_eq!(link.cfg_value("PWD").as_deref(), Some("NULL"));
+        assert!(link.sent().iter().all(|c| !c.contains("mqtt-alt")), "{:?}", link.sent());
+
+        let empty = Cfg::parse_text(&dump.replace("AT+PWD=mqtt-alt", "AT+PWD=NULL"));
+        assert!(plan_clearing(&tpl, &empty, &BTreeMap::new(), &clear).unwrap().is_empty(), "already empty");
+        let refused = plan_clearing(&tpl, &cfg, &BTreeMap::new(), &["PWORD".to_string(), "XYZ".to_string()].into()).unwrap_err();
+        let by_key: BTreeMap<&str, &str> = refused.iter().map(|e| (e.key.as_str(), e.message.as_str())).collect();
+        assert_eq!(by_key["PWORD"], "Diese Einstellung kann nicht geleert werden.", "the device password is never cleared");
+        assert_eq!(by_key["XYZ"], "Diese Einstellung kennt die Vorlage nicht.");
+        assert_eq!(refused.len(), 2);
+    }
+
     #[test]
     fn a_change_without_restart_needs_none() {
         let link = device();
@@ -556,11 +634,13 @@ mod tests {
     #[test]
     fn a_late_ok_is_not_taken_for_the_next_command() {
         let link = device();
-        let wait = Duration::from_millis(300);
-        // TDC answers after its wait is over; SHTEMP refuses, but more slowly than TDC's late OK arrives. Without the
-        // pause after a silence, that OK would be read as SHTEMP's.
-        link.reply_late("AT+TDC=1800", Duration::from_millis(450), &["OK"]);
-        link.reply_late("AT+SHTEMP=20,30", Duration::from_millis(200), &["AT_PARAM_ERROR"]);
+        let wait = Duration::from_millis(800);
+        // TDC answers half a wait after its wait is over, in the middle of the pause that follows a silence. SHTEMP
+        // refuses, and the fake answers in order, so its refusal never comes before TDC's late OK: without the pause,
+        // that OK would be read as SHTEMP's, however the threads are scheduled. Only a TDC reply delayed by more than
+        // half a wait (400 ms) beyond its schedule could miss the pause.
+        link.reply_late("AT+TDC=1800", wait + wait / 2, &["OK"]);
+        link.reply_late("AT+SHTEMP=20,30", Duration::ZERO, &["AT_PARAM_ERROR"]);
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
         let out = apply(&link, &s31_template(), &changes, wait, &AtomicBool::new(false), &mut |_| {});
         assert_eq!(out.fields[1].status, Status::Failed { why: "Das Gerät hat den Wert abgelehnt (AT_PARAM_ERROR).".into() });
@@ -594,6 +674,20 @@ mod tests {
     }
 
     #[test]
+    fn a_read_back_without_its_model_line_still_verifies() {
+        let link = device();
+        let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
+        link.reply("AT+CFG", &["AT+TDC=1800", "AT+SHTEMP=20,30", "OK"]);
+        let (out, _) = run(&link, &changes);
+        assert_eq!(out.fields.iter().map(|f| &f.status).collect::<Vec<_>>(), [&Status::Verified, &Status::Verified]);
+        assert_eq!(out.readback.as_ref().and_then(|c| c.model.as_deref()), None);
+
+        link.reply("AT+CFG", &["OK"]);
+        let (out, _) = run(&link, &changes);
+        assert_eq!(out.fields[0].status, Status::Unverified { why: "AT+CFG hat keine Einstellungen geliefert.".into() });
+    }
+
+    #[test]
     fn stop_and_a_missing_link_send_nothing() {
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800")])).unwrap();
         let link = device();
@@ -606,7 +700,7 @@ mod tests {
     }
 
     /// Covers what this module sends and returns. The reply lines of the read-back are logged by the link itself
-    /// (`<< AT+PWORD=…` in clear on an S31-NB); masking those needs the logging side to call [`redact::redact_line`].
+    /// (`<< AT+PWORD=…` in clear on an S31-NB), masked by [`redact::log_line`], which has its own test.
     #[test]
     fn a_transfer_never_sends_or_reports_a_password_in_clear() {
         let link = device();
@@ -653,14 +747,14 @@ mod tests {
     }
 
     #[test]
-    fn values_with_commas_and_quotes_go_out_and_verify_as_entered() {
+    fn values_with_commas_and_quotes_go_out_in_the_device_s_format_and_verify() {
         let link = device();
         let wanted = want(&[("DNSCFG", "\"1.1.1.1\", \"8.8.4.4\""), ("SHTEMP", "-5,30"), ("CLOCKLOG", "1,0,30,4")]);
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &wanted).unwrap();
         let (out, _) = run(&link, &changes);
-        assert_eq!(link.sent(), ["AT+SHTEMP=-5,30", "AT+DNSCFG=\"1.1.1.1\", \"8.8.4.4\"", "AT+CLOCKLOG=1,0,30,4", "AT+CFG"]);
+        assert_eq!(link.sent(), ["AT+SHTEMP=-5,30", "AT+DNSCFG=\"1.1.1.1\",\"8.8.4.4\"", "AT+CLOCKLOG=1,0,30,4", "AT+CFG"]);
         assert!(out.all_verified(), "{:?}", out.fields);
-        assert_eq!(link.cfg_value("DNSCFG").as_deref(), Some("\"1.1.1.1\", \"8.8.4.4\""));
+        assert_eq!(link.cfg_value("DNSCFG").as_deref(), Some("\"1.1.1.1\",\"8.8.4.4\""), "as AT+CFG prints it");
         assert!(out.reboot_needed, "DNSCFG and CLOCKLOG need a restart");
     }
 

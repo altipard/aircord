@@ -179,7 +179,7 @@ refused too.
 | `choice` | `options = [{ text, value }]` (required), `custom`, `pattern`, `max_len` | One of the options. With `custom = true` any other value is allowed too, checked by `pattern` and `max_len` (only allowed with `custom`). Option values are unique. |
 | `toggle` | `on`, `off` (both required, different) | The values the two positions send. Inverted device logic is just values: `on = "0,8,16"`, `off = "1,0,0"`. |
 | `text` | `pattern`, `max_len`, `clearable` | Not empty, unless `clearable = true`: then an empty input clears the value and the device gets `AT+<KEY>=NULL`, the way `AT+CFG` prints an unset value. |
-| `secret` | `pattern`, `max_len`, `clearable` | Like `text`, never shown or logged in clear. |
+| `secret` | `pattern`, `max_len`, `clearable` | Like `text`, never shown or logged in clear. An empty input means "unchanged", because the field cannot show the current value; with `clearable = true` the value is cleared only on an explicit request (`transfer::plan_clearing`). |
 
 `distinct = [2, 3]` (for `text`, `secret` and the free text of a `choice`)
 refuses a value whose comma-separated parts at those positions, counted from 1,
@@ -208,11 +208,17 @@ on it:
    that differ, in template order. Numbers compare by value (`0900` is `900`);
    text compares part by part between commas, without outer spaces and double
    quotes (`"8.8.8.8", "8.8.4.4"` is `"8.8.8.8","8.8.4.4"`); secrets compare
-   exactly. Settings hidden by `visible_if` are left out. Empty input is
-   refused, except for a `clearable` setting, which is then sent as `NULL`. The
-   presets mark the MQTT fields (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`,
-   `SUBTOPIC`) clearable. `needing_confirmation` names the `network` and
-   `irreversible` changes to ask about.
+   exactly. `DNSCFG` goes out without spaces around its commas
+   (`"1.1.1.1","8.8.4.4"`), the form `AT+CFG` prints; other text is sent as
+   entered. Settings hidden by `visible_if` are left out. Empty input is
+   refused, except for a `clearable` setting, which is then sent as `NULL`. An
+   empty secret is no change at all: a password field left empty keeps the
+   device's password. `plan_clearing` takes the keys the person explicitly asked
+   to clear; that is the only way to send `NULL` for a secret, and it is refused
+   for a setting that is not `clearable`. The presets mark the MQTT fields
+   (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`, `SUBTOPIC`) clearable.
+   `needing_confirmation` names the `network` and `irreversible` changes to ask
+   about.
 4. `apply` sends each change and waits for `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and
    the other `AT_…ERROR` lines mark that field as failed; the others are still
    sent. A command that gets no answer is not failed: the device may have taken
@@ -221,7 +227,9 @@ on it:
    a stop ends the transfer; the rest is reported as not sent.
 5. It then reads `AT+CFG` again and reports each field as verified, different
    (the device kept another value), failed (refused or not sent), or unverified
-   (the read-back did not show it or could not be read).
+   (the read-back did not show it or could not be read). The read-back must
+   contain settings but not necessarily `AT+MODEL`; only the first read needs
+   the model, to pick the template.
 6. When a change that may have been taken (verified or unverified) has
    `needs_reboot`, the outcome says a restart is due and
    `Template::reboot_action` names the template's restart (a `button` with
@@ -239,7 +247,8 @@ settings of `type = "secret"`. Some firmware prints `AT+PWORD` in clear in
 
 - The link masks the fixed keys in every line it logs, sent (`>> `) and
   received (`<< `), so the terminal and a saved transcript show
-  `AT+PWORD=******`. Reply lines reach the core unmasked, because verifying a
+  `AT+PWORD=******`. The BLE link and the test fake both log through
+  `redact::log_line`. Reply lines reach the core unmasked, because verifying a
   change needs the value.
 - A transfer sends secrets through `Link::send_secret`, and no change, result or
   `{:?}` output carries their value; the read-back masks the template's own
