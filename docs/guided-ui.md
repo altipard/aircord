@@ -45,7 +45,8 @@ Antenne angeschraubt? Gerät näher ans Fenster?“.
 
 ## Passwort
 
-Ein Passwortfeld erscheint nur, wenn das Gerät auf die Frage nach seinen Einstellungen nicht antwortet. Das Passwort
+Ein Passwortfeld erscheint nur, wenn das Gerät auf die Frage nach seinen Einstellungen nicht antwortet oder keine
+nennt. War schon beim Verbinden ein Passwort eingetragen, steht dort, dass es nicht angenommen wurde. Das Passwort
 steht auf dem Etikett des Geräts. Es wird verdeckt eingegeben und erscheint weder im Terminal noch in einem
 gespeicherten Protokoll oder im Befehlsverlauf.
 
