@@ -34,7 +34,7 @@ pub struct Change {
     pub label: String,
     /// The value `AT+CFG` reported (empty for `NULL`); [`redact::MASK`] for a secret, whose old value is not kept.
     pub from: String,
-    /// The checked value that is sent.
+    /// The checked value; empty clears the setting and goes out as `NULL`.
     pub to: String,
     /// Never shown or logged in clear.
     pub secret: bool,
@@ -47,7 +47,7 @@ pub struct Change {
 impl Change {
     /// The command the device gets.
     pub fn cmd(&self) -> String {
-        format!("AT+{}={}", self.key, self.to)
+        format!("AT+{}={}", self.key, if self.to.is_empty() { "NULL" } else { &self.to })
     }
 
     /// The command as it may be shown or logged.
@@ -486,6 +486,21 @@ mod tests {
         assert_eq!(progress[0], Progress::Sending { n: 1, total: 3, key: "PRO".into(), label: "Übertragungsart und Datenformat".into() });
         assert_eq!(progress[3], Progress::Verifying);
         assert_eq!(tpl.reboot_action().map(|a| a.cmd.as_str()), Some("ATZ"));
+    }
+
+    #[test]
+    fn a_clearable_field_is_cleared_with_null() {
+        let dump = S31.replace("AT+PRO=2,5", "AT+PRO=3,5").replace("AT+UNAME=NULL", "AT+UNAME=old-user");
+        let link = FakeLink::configured("A", "x", &dump);
+        link.connect("A");
+        let tpl = s31_template();
+        let changes = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("UNAME", ""), ("CLIENT", "")])).unwrap();
+        assert_eq!(changes.iter().map(Change::cmd).collect::<Vec<_>>(), ["AT+UNAME=NULL"], "CLIENT is already empty");
+        let (out, _) = run(&link, &changes);
+        assert!(out.all_verified(), "{:?}", out.fields);
+        assert_eq!(link.cfg_value("UNAME").as_deref(), Some("NULL"));
+        let apn = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("APN", "")])).unwrap_err();
+        assert_eq!(apn[0].message, "Bitte einen Wert eingeben.", "the APN cannot be cleared");
     }
 
     #[test]

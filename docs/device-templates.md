@@ -178,8 +178,8 @@ refused too.
 | `number` | `unit` (any display text, e.g. `°C`), `presets`, `min`, `max` | A whole number. |
 | `choice` | `options = [{ text, value }]` (required), `custom`, `pattern`, `max_len` | One of the options. With `custom = true` any other value is allowed too, checked by `pattern` and `max_len` (only allowed with `custom`). Option values are unique. |
 | `toggle` | `on`, `off` (both required, different) | The values the two positions send. Inverted device logic is just values: `on = "0,8,16"`, `off = "1,0,0"`. |
-| `text` | `pattern`, `max_len` | Not empty. |
-| `secret` | `pattern`, `max_len` | Like `text`, never shown or logged in clear. |
+| `text` | `pattern`, `max_len`, `clearable` | Not empty, unless `clearable = true`: then an empty input clears the value and the device gets `AT+<KEY>=NULL`, the way `AT+CFG` prints an unset value. |
+| `secret` | `pattern`, `max_len`, `clearable` | Like `text`, never shown or logged in clear. |
 
 A `pattern` must match the whole input; Aircord anchors it, so `'[a-z]{6}'`
 means exactly six lower-case letters. Write regexps as TOML literal strings
@@ -201,8 +201,10 @@ on it:
    blind.
 3. `plan` compares the wanted values with the device's and checks only those
    that differ, in template order. Numbers compare by value (`0900` is `900`).
-   Settings hidden by `visible_if` are left out. A value cannot be cleared:
-   empty input is refused and `NULL` is never sent. `needing_confirmation` names
+   Settings hidden by `visible_if` are left out. Empty input is refused, except
+   for a `clearable` setting, which is then sent as `NULL`. The presets mark the
+   MQTT fields (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`, `SUBTOPIC`) clearable.
+   `needing_confirmation` names
    the `network` and `irreversible` changes to ask about.
 4. `apply` sends each change and waits for `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and
    the other `AT_…ERROR` lines mark that field as failed; the others are still

@@ -175,6 +175,8 @@ pub struct Setting {
     pub visible_if: Option<Condition>,
     /// Shown only in expert mode.
     pub expert: bool,
+    /// An empty input clears the value: the device gets `AT+<key>=NULL`, as `AT+CFG` prints an unset value.
+    pub clearable: bool,
 }
 
 #[derive(Deserialize)]
@@ -200,6 +202,7 @@ pub(crate) struct RawSetting {
     off: Option<String>,
     pattern: Option<String>,
     max_len: Option<usize>,
+    clearable: Option<bool>,
     #[serde(default)]
     risk: String,
     #[serde(default)]
@@ -249,6 +252,7 @@ impl RawSetting {
             ("off", self.off.is_some()),
             ("pattern", self.pattern.is_some()),
             ("max_len", self.max_len.is_some()),
+            ("clearable", self.clearable.is_some()),
         ];
         given.into_iter().find(|(name, set)| *set && !allowed.contains(name)).map(|(name, _)| name)
     }
@@ -269,7 +273,7 @@ impl RawSetting {
             "duration" | "number" => &["unit", "presets", "min", "max"],
             "choice" => &["options", "custom", "pattern", "max_len"],
             "toggle" => &["on", "off"],
-            "text" | "secret" => &["pattern", "max_len"],
+            "text" | "secret" => &["pattern", "max_len", "clearable"],
             other => return Err(at(&format!("unknown type {other:?} (want duration|choice|toggle|text|secret|number)"))),
         };
         if let Some(name) = self.stray(allowed) {
@@ -346,6 +350,7 @@ impl RawSetting {
             needs_reboot: self.needs_reboot,
             visible_if,
             expert: self.expert,
+            clearable: self.clearable.unwrap_or(false),
         })
     }
 }
@@ -392,7 +397,8 @@ impl Setting {
     }
 
     /// Checks an entered value and returns what is sent, or why not in words for the person in the field. A secret's
-    /// message never repeats the input.
+    /// message never repeats the input. For a `clearable` setting an empty input is fine and comes back empty, which
+    /// [`crate::transfer`] sends as `NULL`.
     pub fn check(&self, input: &str) -> Result<String, String> {
         if input.contains(['\r', '\n']) {
             return Err("Zeilenumbrüche sind nicht erlaubt.".into());
@@ -400,7 +406,7 @@ impl Setting {
         let v = input.trim();
         let check_text = |pattern: &Option<Regex>, max_len: &Option<usize>| -> Result<String, String> {
             if v.is_empty() {
-                return Err("Bitte einen Wert eingeben.".into());
+                return if self.clearable { Ok(String::new()) } else { Err("Bitte einen Wert eingeben.".into()) };
             }
             let n = v.chars().count();
             if let Some(max) = *max_len
@@ -531,6 +537,17 @@ mod tests {
         assert_eq!(s.check("1,0,0").unwrap(), "1,0,0");
         assert_eq!(s.check("1").unwrap_err(), "Bitte ein- oder ausschalten.");
         assert_eq!((s.shown("0,8,16").as_str(), s.shown("1,0,0").as_str()), ("Ein", "Aus"));
+    }
+
+    #[test]
+    fn a_clearable_field_takes_an_empty_input() {
+        let s = ok("key = \"UNAME\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"\nclearable = true\npattern = '[a-z]+'");
+        assert!(s.clearable);
+        assert_eq!(s.check("  ").unwrap(), "", "empty clears, the pattern does not apply");
+        assert_eq!(s.check("abc").unwrap(), "abc");
+        assert!(s.check("ABC").is_err());
+        assert!(!ok("key = \"UNAME\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"").clearable);
+        assert!(setting("key = \"T\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"duration\"\nunit = \"s\"\nclearable = true").is_err());
     }
 
     #[test]

@@ -131,6 +131,7 @@ group        = "MQTT-Zugang"
 type         = "text"
 risk         = "network"
 needs_reboot = true
+clearable    = true
 visible_if   = "PRO=3,*"
 
 [[setting]]
@@ -140,6 +141,7 @@ group        = "MQTT-Zugang"
 type         = "text"
 risk         = "network"
 needs_reboot = true
+clearable    = true
 visible_if   = "PRO=3,*"
 
 [[setting]]
@@ -150,6 +152,7 @@ help         = "Nicht das Gerätepasswort."
 type         = "secret"
 risk         = "network"
 needs_reboot = true
+clearable    = true
 visible_if   = "PRO=3,*"
 
 [[setting]]
@@ -158,6 +161,7 @@ label        = "MQTT-Sende-Topic"
 group        = "MQTT-Zugang"
 type         = "text"
 needs_reboot = true
+clearable    = true
 visible_if   = "PRO=3,*"
 
 [[setting]]
@@ -166,6 +170,7 @@ label        = "MQTT-Empfangs-Topic"
 group        = "MQTT-Zugang"
 type         = "text"
 needs_reboot = true
+clearable    = true
 visible_if   = "PRO=3,*"
 
 # --- Messen und Senden --------------------------------------------------------
