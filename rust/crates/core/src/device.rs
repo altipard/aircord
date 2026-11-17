@@ -449,6 +449,9 @@ type  = "select"
         assert_eq!(tpl.settings_for(&cfg, false).count(), tpl.settings.iter().filter(|s| !s.expert).count());
         assert_eq!(tpl.settings_for(&cfg, true).count(), tpl.settings.len());
         assert_eq!(tpl.redact("<< AT+PWORD=kxqmzp"), "<< AT+PWORD=******");
+        let dns = tpl.setting("DNSCFG").unwrap();
+        assert!(dns.check("8.8.8.8").is_err() && dns.check("\"1.1.1.1\", \"8.8.4.4\"").is_ok() && dns.check("\"1.1.1.1\"").is_ok());
+        assert!(dns.same(cfg.get("DNSCFG").unwrap(), "\"8.8.8.8\", \"8.8.4.4\""), "a space after the comma is no change");
     }
 
     #[test]

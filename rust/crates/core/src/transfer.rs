@@ -15,7 +15,7 @@ use crate::device::Template;
 use crate::lines::{NoLine, Tap};
 use crate::link::Link;
 use crate::redact;
-use crate::settings::{Field, Risk};
+use crate::settings::{Compare, Risk};
 
 /// The command that prints every setting.
 pub const READ_CMD: &str = "AT+CFG";
@@ -40,8 +40,8 @@ pub struct Change {
     pub secret: bool,
     pub risk: Risk,
     pub needs_reboot: bool,
-    /// Compared by number in the read-back, so `0900` counts as `900`.
-    numeric: bool,
+    /// How the read-back is compared: by number, loosely, or exactly for a secret.
+    compare: Compare,
 }
 
 impl Change {
@@ -61,12 +61,7 @@ impl Change {
     }
 
     fn holds(&self, actual: &str) -> bool {
-        if self.numeric
-            && let (Ok(a), Ok(b)) = (actual.trim().parse::<i64>(), self.to.trim().parse::<i64>())
-        {
-            return a == b;
-        }
-        actual.trim() == self.to.trim()
+        self.compare.same(actual, &self.to)
     }
 }
 
@@ -127,7 +122,7 @@ pub fn plan(tpl: &Template, current: &Cfg, wanted: &BTreeMap<String, String>) ->
                 secret: s.is_secret(),
                 risk: s.risk,
                 needs_reboot: s.needs_reboot,
-                numeric: matches!(s.field, Field::Duration { .. } | Field::Number { .. }),
+                compare: s.compare(),
             }),
             Err(message) => errors.push(error(message)),
         }

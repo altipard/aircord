@@ -371,6 +371,34 @@ fn parse_int(input: &str) -> Option<i64> {
     input.trim().parse().ok()
 }
 
+/// How a wanted value is compared with what the device reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compare {
+    /// As text, outer spaces aside: secrets, where every character counts.
+    Exact,
+    /// By value: `0900` is `900`.
+    Number,
+    /// Part by part between commas, each without outer spaces and double quotes: `"8.8.8.8", "8.8.4.4"` is
+    /// `"8.8.8.8","8.8.4.4"`, however the firmware prints it.
+    Loose,
+}
+
+impl Compare {
+    pub fn same(self, a: &str, b: &str) -> bool {
+        match self {
+            Compare::Number => match (parse_int(a), parse_int(b)) {
+                (Some(x), Some(y)) => x == y,
+                _ => a.trim() == b.trim(),
+            },
+            Compare::Loose => {
+                let parts = |v: &str| v.split(',').map(|p| p.trim().trim_matches('"').trim().to_string()).collect::<Vec<_>>();
+                parts(a) == parts(b)
+            }
+            Compare::Exact => a.trim() == b.trim(),
+        }
+    }
+}
+
 impl Setting {
     /// Whether its value is never shown: `type = "secret"`, or a key that is always secret ([`redact::ALWAYS_SECRET`]).
     pub fn is_secret(&self) -> bool {
@@ -382,14 +410,18 @@ impl Setting {
         self.visible_if.as_ref().is_none_or(|c| c.holds(value_of(&c.key)))
     }
 
-    /// Whether two values mean the same: numbers by value (`0900` is `900`), the rest as text, outer spaces aside.
-    pub fn same(&self, a: &str, b: &str) -> bool {
-        if matches!(self.field, Field::Duration { .. } | Field::Number { .. })
-            && let (Some(x), Some(y)) = (parse_int(a), parse_int(b))
-        {
-            return x == y;
+    /// How its values are compared with the device's.
+    pub fn compare(&self) -> Compare {
+        match self.field {
+            Field::Duration { .. } | Field::Number { .. } => Compare::Number,
+            Field::Text { .. } | Field::Choice { .. } if !self.is_secret() => Compare::Loose,
+            _ => Compare::Exact,
         }
-        a.trim() == b.trim()
+    }
+
+    /// Whether two values mean the same, by [`Setting::compare`].
+    pub fn same(&self, a: &str, b: &str) -> bool {
+        self.compare().same(a, b)
     }
 
     /// A value as the person sees it: a choice's text, "Ein"/"Aus", a duration in words, a secret as asterisks.
@@ -557,6 +589,18 @@ mod tests {
         assert_eq!(s.check("1,0,0").unwrap(), "1,0,0");
         assert_eq!(s.check("1").unwrap_err(), "Bitte ein- oder ausschalten.");
         assert_eq!((s.shown("0,8,16").as_str(), s.shown("1,0,0").as_str()), ("Ein", "Aus"));
+    }
+
+    #[test]
+    fn text_compares_loosely_but_secrets_exactly() {
+        let dns = ok("key = \"DNSCFG\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"");
+        assert!(dns.same("\"8.8.8.8\",\"8.8.4.4\"", " \"8.8.8.8\" , \"8.8.4.4\" "));
+        assert!(dns.same("\"8.8.8.8\",\"8.8.4.4\"", "8.8.8.8,8.8.4.4"));
+        assert!(!dns.same("\"8.8.8.8\",\"8.8.4.4\"", "\"8.8.4.4\",\"8.8.8.8\""), "order counts");
+        assert!(!dns.same("a b", "ab"), "spaces inside a part count");
+        let secret = ok("key = \"TOKEN\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"secret\"");
+        assert!(!secret.same("\"x\"", "x"), "a secret is compared exactly");
+        assert_eq!(secret.compare(), Compare::Exact);
     }
 
     #[test]
