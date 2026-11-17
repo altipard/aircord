@@ -43,8 +43,12 @@ variables:
       - .cargo/git/db
       - target/
 
+# fmt and clippy on stable: lints are added and changed with every release, so
+# an older clippy flags code the current one accepts. Developers run
+# `task check` on stable; CI lints with the same rules. Build and test stay on
+# RUST_VERSION to prove the MSRV.
 fmt:
-  image: rust:${RUST_VERSION}-bookworm
+  image: rust:bookworm
   stage: check
   script:
     - rustup component add rustfmt
@@ -52,6 +56,7 @@ fmt:
 
 clippy:
   extends: .rust-linux
+  image: rust:bookworm
   stage: check
   script:
     - rustup component add clippy
@@ -61,6 +66,7 @@ test:
   extends: .rust-linux
   stage: check
   script:
+    - cargo build --workspace --locked
     - cargo test --workspace --locked
 
 # ---------------------------------------------------------------- packaging --

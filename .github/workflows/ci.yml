@@ -9,15 +9,18 @@ permissions:
   contents: read
 
 env:
-  # The workspace's rust-version: CI proves the MSRV, not just the latest stable.
+  # The workspace's rust-version: build and test prove the MSRV.
   RUST_VERSION: "1.95"
   CARGO_TERM_COLOR: always
 
 # Same gate as `task check`, on both platforms the BLE stack (CoreBluetooth,
 # BlueZ) and the window stack differ on.
 jobs:
-  check:
-    name: fmt / clippy / test (${{ matrix.os }})
+  # fmt and clippy on stable: lints are added and changed with every release,
+  # so an older clippy flags code the current one accepts. Developers run
+  # `task check` on stable; CI lints with the same rules.
+  lint:
+    name: fmt / clippy (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -25,9 +28,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
@@ -44,5 +46,29 @@ jobs:
         run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  msrv:
+    name: build / test on ${{ matrix.os }} (Rust 1.95)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdbus-1-dev libxkbcommon-dev \
+            libgl1-mesa-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - name: build
+        run: cargo build --workspace --locked
       - name: test
         run: cargo test --workspace --locked
