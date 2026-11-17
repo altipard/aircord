@@ -98,8 +98,8 @@ Das beantwortet die offenen Punkte 1, 2 und 9 des Inventars
 - **`NULL`** heißt leer bzw. unbenutzt. `AT+BKDNS=1,0,NULL` enthält `NULL` als
   Teilwert und bleibt so stehen.
 - **Passwörter im Klartext:** Das Gerät gibt `AT+PWORD` im Klartext aus. Aircord
-  maskiert `AT+PWORD`, `AT+PWD` und `AT+OTAPWD` überall, wo Werte gezeigt oder
-  protokolliert werden.
+  maskiert `AT+PWORD`, `AT+PIN`, `AT+PWD` und `AT+OTAPWD` im Log der Verbindung
+  (gesendet und empfangen) und in allen Ergebnissen der Übertragung.
 - **Band** steht nicht in `AT+CFG`, nur im Startbanner. Das Setzen per
   `AT+QBAND` ist nicht getestet und fehlt deshalb im Preset.
 - **Statuskarte:** Modul, IMEI, IMSI, Band, APN gesetzt und Signal kommen aus dem

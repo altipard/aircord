@@ -199,24 +199,31 @@ on it:
 
 1. `read_cfg` sends `AT+CFG` and reads every `AT+<KEY>=<value>` line up to `OK`.
    Blank lines, echoes, banners and the `Signal Strength:` lines a node prints
-   every few seconds are skipped; `NULL` reads as empty.
+   every few seconds are skipped; `NULL` reads as empty. A dump without any
+   setting or without its `AT+MODEL` line is an error, not an empty state.
 2. `Template::settings_for` lists the settings whose `key` the device reported.
    A setting the device does not report is not available and is never sent
    blind.
 3. `plan` compares the wanted values with the device's and checks only those
-   that differ, in template order. Numbers compare by value (`0900` is `900`).
-   Settings hidden by `visible_if` are left out. Empty input is refused, except
-   for a `clearable` setting, which is then sent as `NULL`. The presets mark the
-   MQTT fields (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`, `SUBTOPIC`) clearable.
-   `needing_confirmation` names
-   the `network` and `irreversible` changes to ask about.
+   that differ, in template order. Numbers compare by value (`0900` is `900`);
+   text compares part by part between commas, without outer spaces and double
+   quotes (`"8.8.8.8", "8.8.4.4"` is `"8.8.8.8","8.8.4.4"`); secrets compare
+   exactly. Settings hidden by `visible_if` are left out. Empty input is
+   refused, except for a `clearable` setting, which is then sent as `NULL`. The
+   presets mark the MQTT fields (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`,
+   `SUBTOPIC`) clearable. `needing_confirmation` names the `network` and
+   `irreversible` changes to ask about.
 4. `apply` sends each change and waits for `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and
    the other `AT_…ERROR` lines mark that field as failed; the others are still
-   sent.
+   sent. A command that gets no answer is not failed: the device may have taken
+   it, so the read-back decides. After such a silence `apply` waits briefly and
+   discards a late reply, so it cannot answer the next command. A lost link or
+   a stop ends the transfer; the rest is reported as not sent.
 5. It then reads `AT+CFG` again and reports each field as verified, different
-   (the device answered `OK` but kept another value) or failed, or as unverified
-   when the read-back did not show it.
-6. When a taken change has `needs_reboot`, the outcome says a restart is due and
+   (the device kept another value), failed (refused or not sent), or unverified
+   (the read-back did not show it or could not be read).
+6. When a change that may have been taken (verified or unverified) has
+   `needs_reboot`, the outcome says a restart is due and
    `Template::reboot_action` names the template's restart (a `button` with
    `cmd = "ATZ"`). Nothing in the core sends it.
 
@@ -225,18 +232,21 @@ A worked example of real `AT+CFG` output is in
 
 ### Passwords
 
-`AT+PWORD` (device password), `AT+PWD` (MQTT password) and `AT+OTAPWD` are
-treated as secret whatever the template says, and so are settings of
-`type = "secret"`. Some firmware prints `AT+PWORD` in clear in `AT+CFG`, so this
-matters for any transcript you save or share.
+`AT+PWORD` and `AT+PIN` (device password), `AT+PWD` (MQTT password) and
+`AT+OTAPWD` are treated as secret whatever the template says, and so are
+settings of `type = "secret"`. Some firmware prints `AT+PWORD` in clear in
+`AT+CFG`, so this matters for any transcript you save or share.
 
-- A transfer sends secrets through `Link::send_secret`, so the echo in the log
-  is masked, and no change, result or `{:?}` output carries their value.
+- The link masks the fixed keys in every line it logs, sent (`>> `) and
+  received (`<< `), so the terminal and a saved transcript show
+  `AT+PWORD=******`. Reply lines reach the core unmasked, because verifying a
+  change needs the value.
+- A transfer sends secrets through `Link::send_secret`, and no change, result or
+  `{:?}` output carries their value; the read-back masks the template's own
+  secrets too.
 - `redact::redact_line` (or `Template::redact`, which adds the template's
-  secrets) masks the value in any line as `******`.
-- Not yet done: the link logs reply lines (`<< AT+PWORD=…`) as they arrive, in
-  clear. Masking the terminal and saved transcripts needs the logging side to
-  pass every line through `redact_line`.
+  secrets) masks the value in any line as `******`. The link knows only the
+  fixed keys: a template's own secret keys are not masked in the link's log.
 
 ## Validation
 
