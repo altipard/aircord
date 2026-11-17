@@ -17,8 +17,8 @@ im Reiter **Einstellungen** nachholen.
 4. **Übertragen** drücken. Ein Dialog zeigt jede Änderung als Vorher und Nachher. Erst nach der Bestätigung wird
    gesendet.
 
-Ist **Übertragen** gesperrt und steht unten „bitte zuerst die Einstellungen neu lesen“ steht, hat Aircord keinen aktuellen
-Stand des Geräts: mit dem Kreispfeil oben rechts neu lesen.
+Ist **Übertragen** gesperrt und steht unten „bitte zuerst die Einstellungen neu lesen“, hat Aircord keinen
+aktuellen Stand des Geräts: mit dem Kreispfeil oben rechts neu lesen.
 
 ## Das Ergebnis
 
