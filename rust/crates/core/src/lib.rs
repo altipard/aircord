@@ -19,3 +19,4 @@ pub mod scan;
 pub mod session;
 pub mod settings;
 pub mod slug;
+pub mod transfer;

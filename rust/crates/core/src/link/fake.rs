@@ -1,10 +1,12 @@
 //! A scripted device behind the [`Link`] trait, for tests of the runs here and of the window: an AT console that
-//! answers `OK`, and, for an NB node, a reset into a frame-accurate bootloader that advertises under the IMEI.
+//! answers `OK`, and, for an NB node, a reset into a frame-accurate bootloader that advertises under the IMEI. A
+//! [`FakeLink::configured`] console also keeps settings: `AT+<KEY>=<value>` changes what its `AT+CFG` prints.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::cfg::setting_line;
 use crate::lines::{Tap, Taps, lock};
 use crate::link::{Device, Events, Link, mask, summarize_line};
 use crate::otanb::FakeBootloader;
@@ -31,6 +33,12 @@ struct State {
     /// The node's IMEI, when it is an NB node that resets into its bootloader.
     imei: Option<String>,
     bootloader: FakeBootloader,
+    /// The lines `AT+CFG` prints before its `OK`, when the device keeps settings.
+    cfg: Option<Vec<String>>,
+    /// Keys whose set is refused, with the error line.
+    rejects: BTreeMap<String, String>,
+    /// Keys whose set is answered `OK` but not kept.
+    ignored: BTreeSet<String>,
 }
 
 /// The fake link. Everything happens inline, on the caller's thread.
@@ -60,6 +68,32 @@ impl FakeLink {
             );
         }
         link
+    }
+
+    /// A device that keeps settings: `AT+CFG` prints `dump` (up to its `OK`, blank lines and all) with the current
+    /// values, and `AT+<KEY>=<value>` for a key in it answers `OK` and changes it. A set for a key the dump lacks
+    /// answers `OK` and changes nothing, as a device that takes a command it does not report.
+    pub fn configured(addr: &str, name: &str, dump: &str) -> FakeLink {
+        let link = FakeLink::console(addr, name);
+        let lines = dump.lines().take_while(|l| !l.trim().eq_ignore_ascii_case("OK")).map(str::to_string).collect();
+        lock(&link.state).cfg = Some(lines);
+        link
+    }
+
+    /// A set of `key` is answered with `error` (`AT_PARAM_ERROR`) and changes nothing.
+    pub fn reject(&self, key: &str, error: &str) {
+        lock(&self.state).rejects.insert(key.into(), error.into());
+    }
+
+    /// A set of `key` is answered `OK` and changes nothing, as firmware that quietly drops a value.
+    pub fn ignore_set(&self, key: &str) {
+        lock(&self.state).ignored.insert(key.into());
+    }
+
+    /// What a configured device holds for `key`, as `AT+CFG` would print it.
+    pub fn cfg_value(&self, key: &str) -> Option<String> {
+        let s = lock(&self.state);
+        s.cfg.as_ref()?.iter().find_map(|l| setting_line(l).filter(|(k, _)| *k == key).map(|(_, v)| v.to_string()))
     }
 
     /// Where the link reports; a window under test passes its own.
@@ -123,7 +157,29 @@ impl FakeLink {
             }
             return (Vec::new(), true);
         }
-        (s.replies.get(cmd).cloned().unwrap_or_else(|| vec!["OK".into()]), false)
+        if let Some(lines) = s.replies.get(cmd) {
+            return (lines.clone(), false);
+        }
+        FakeLink::settings_answer(&mut s, cmd).map_or_else(|| (vec!["OK".into()], false), |lines| (lines, false))
+    }
+
+    /// A configured device's answer to `AT+CFG` or a set; none for anything else or a device without settings.
+    fn settings_answer(s: &mut State, cmd: &str) -> Option<Vec<String>> {
+        let State { cfg, rejects, ignored, .. } = s;
+        let dump = cfg.as_mut()?;
+        if cmd.trim().eq_ignore_ascii_case("AT+CFG") {
+            return Some(dump.iter().cloned().chain(["OK".to_string()]).collect());
+        }
+        let (key, value) = setting_line(cmd)?;
+        if let Some(error) = rejects.get(key) {
+            return Some(vec![error.clone()]);
+        }
+        if !ignored.contains(key)
+            && let Some(line) = dump.iter_mut().find(|l| setting_line(l).is_some_and(|(k, _)| k == key))
+        {
+            *line = format!("AT+{key}={}", if value.is_empty() { "NULL" } else { value });
+        }
+        Some(vec!["OK".into()])
     }
 
     fn deliver(&self, replies: Vec<String>, resets: bool) {
