@@ -23,12 +23,12 @@ tasks:
   lint:
     desc: Run clippy on every crate and target, warnings are errors
     cmds:
-      - cargo clippy --workspace --all-targets -- -D warnings
+      - cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
     desc: Run tests
     cmds:
-      - cargo test --workspace
+      - cargo test --workspace --locked
 
   check:
     desc: CI gate — format check, clippy, test
@@ -40,7 +40,7 @@ tasks:
   build:
     desc: Build the release binary into target/release
     cmds:
-      - cargo build --release -p aircord
+      - cargo build --release --locked -p aircord
 
   run:
     desc: Build and run the app
