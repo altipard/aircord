@@ -1,13 +1,16 @@
 //! A scripted device behind the [`Link`] trait, for tests of the runs here and of the window: an AT console that
-//! answers `OK`, and, for an NB node, a reset into a frame-accurate bootloader that advertises under the IMEI.
+//! answers `OK`, and, for an NB node, a reset into a frame-accurate bootloader that advertises under the IMEI. A
+//! [`FakeLink::configured`] console also keeps settings: `AT+<KEY>=<value>` changes what its `AT+CFG` prints.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use crate::cfg::setting_line;
 use crate::lines::{Tap, Taps, lock};
 use crate::link::{Device, Events, Link, mask, summarize_line};
 use crate::otanb::FakeBootloader;
+use crate::redact::redact_line;
 
 /// Events that go nowhere.
 pub struct NoEvents;
@@ -31,6 +34,18 @@ struct State {
     /// The node's IMEI, when it is an NB node that resets into its bootloader.
     imei: Option<String>,
     bootloader: FakeBootloader,
+    /// The lines `AT+CFG` prints before its `OK`, when the device keeps settings.
+    cfg: Option<Vec<String>>,
+    /// Keys whose set is refused, with the error line.
+    rejects: BTreeMap<String, String>,
+    /// Keys whose set is answered `OK` but not kept.
+    ignored: BTreeSet<String>,
+    /// Keys whose set is kept but answered with nothing.
+    silent: BTreeSet<String>,
+    /// Keys whose set drops the link, as a device that resets mid-command.
+    drops: BTreeSet<String>,
+    /// Replies by exact command that come only after a delay, from another thread.
+    late: BTreeMap<String, (Duration, Vec<String>)>,
 }
 
 /// The fake link. Everything happens inline, on the caller's thread.
@@ -60,6 +75,47 @@ impl FakeLink {
             );
         }
         link
+    }
+
+    /// A device that keeps settings: `AT+CFG` prints `dump` (up to its `OK`, blank lines and all) with the current
+    /// values, and `AT+<KEY>=<value>` for a key in it answers `OK` and changes it. A set for a key the dump lacks
+    /// answers `OK` and changes nothing, as a device that takes a command it does not report.
+    pub fn configured(addr: &str, name: &str, dump: &str) -> FakeLink {
+        let link = FakeLink::console(addr, name);
+        let lines = dump.lines().take_while(|l| !l.trim().eq_ignore_ascii_case("OK")).map(str::to_string).collect();
+        lock(&link.state).cfg = Some(lines);
+        link
+    }
+
+    /// A set of `key` is answered with `error` (`AT_PARAM_ERROR`) and changes nothing.
+    pub fn reject(&self, key: &str, error: &str) {
+        lock(&self.state).rejects.insert(key.into(), error.into());
+    }
+
+    /// A set of `key` is answered `OK` and changes nothing, as firmware that quietly drops a value.
+    pub fn ignore_set(&self, key: &str) {
+        lock(&self.state).ignored.insert(key.into());
+    }
+
+    /// A set of `key` is kept but never answered, as a device too busy to say `OK`.
+    pub fn silent_set(&self, key: &str) {
+        lock(&self.state).silent.insert(key.into());
+    }
+
+    /// A set of `key` drops the link instead of answering.
+    pub fn drop_on_set(&self, key: &str) {
+        lock(&self.state).drops.insert(key.into());
+    }
+
+    /// `cmd` is answered with `lines`, but only `after` it was sent.
+    pub fn reply_late(&self, cmd: &str, after: Duration, lines: &[&str]) {
+        lock(&self.state).late.insert(cmd.into(), (after, lines.iter().map(|l| l.to_string()).collect()));
+    }
+
+    /// What a configured device holds for `key`, as `AT+CFG` would print it.
+    pub fn cfg_value(&self, key: &str) -> Option<String> {
+        let s = lock(&self.state);
+        s.cfg.as_ref()?.iter().find_map(|l| setting_line(l).filter(|(k, _)| *k == key).map(|(_, v)| v.to_string()))
     }
 
     /// Where the link reports; a window under test passes its own.
@@ -123,13 +179,41 @@ impl FakeLink {
             }
             return (Vec::new(), true);
         }
-        (s.replies.get(cmd).cloned().unwrap_or_else(|| vec!["OK".into()]), false)
+        if s.late.contains_key(cmd) {
+            return (Vec::new(), false);
+        }
+        if setting_line(cmd).is_some_and(|(key, _)| s.drops.contains(key)) {
+            return (Vec::new(), true);
+        }
+        if let Some(lines) = s.replies.get(cmd) {
+            return (lines.clone(), false);
+        }
+        FakeLink::settings_answer(&mut s, cmd).map_or_else(|| (vec!["OK".into()], false), |lines| (lines, false))
+    }
+
+    /// A configured device's answer to `AT+CFG` or a set; none for anything else or a device without settings.
+    fn settings_answer(s: &mut State, cmd: &str) -> Option<Vec<String>> {
+        let State { cfg, rejects, ignored, silent, .. } = s;
+        let dump = cfg.as_mut()?;
+        if cmd.trim().eq_ignore_ascii_case("AT+CFG") {
+            return Some(dump.iter().cloned().chain(["OK".to_string()]).collect());
+        }
+        let (key, value) = setting_line(cmd)?;
+        if let Some(error) = rejects.get(key) {
+            return Some(vec![error.clone()]);
+        }
+        if !ignored.contains(key)
+            && let Some(line) = dump.iter_mut().find(|l| setting_line(l).is_some_and(|(k, _)| k == key))
+        {
+            *line = format!("AT+{key}={}", if value.is_empty() { "NULL" } else { value });
+        }
+        Some(if silent.contains(key) { Vec::new() } else { vec!["OK".into()] })
     }
 
     fn deliver(&self, replies: Vec<String>, resets: bool) {
         let events = self.events();
         for r in replies {
-            events.log(&format!("<< {r}"));
+            events.log(&format!("<< {}", redact_line(&r, &[])));
             self.taps.feed(&r);
         }
         if resets {
@@ -137,7 +221,9 @@ impl FakeLink {
         }
     }
 
+    /// Sends `line`; the log and [`FakeLink::sent`] get `echo` with its passwords masked, as the real link logs it.
     fn write(&self, line: &str, echo: &str) -> bool {
+        let echo = redact_line(echo, &[]);
         {
             let mut s = lock(&self.state);
             if s.connected.is_none() {
@@ -147,6 +233,17 @@ impl FakeLink {
         }
         self.events().log(&format!(">> {echo}"));
         let (replies, resets) = self.answer(line);
+        let late = lock(&self.state).late.get(line.trim_end_matches(['\r', '\n'])).cloned();
+        if let Some((after, lines)) = late {
+            let (taps, events) = (self.taps.clone(), self.events());
+            std::thread::spawn(move || {
+                std::thread::sleep(after);
+                for l in lines {
+                    events.log(&format!("<< {}", redact_line(&l, &[])));
+                    taps.feed(&l);
+                }
+            });
+        }
         self.deliver(replies, resets);
         true
     }
@@ -226,5 +323,48 @@ impl Link for FakeLink {
 
     fn lines(&self) -> Tap {
         self.taps.subscribe()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::transfer::read_cfg;
+
+    #[derive(Default)]
+    struct Log(Mutex<Vec<String>>);
+
+    impl Events for Log {
+        fn log(&self, line: &str) {
+            lock(&self.0).push(line.to_string());
+        }
+        fn link_dropped(&self) {}
+        fn scan_failed(&self, _: &str) {}
+    }
+
+    #[test]
+    fn the_log_never_shows_a_password_of_the_real_dump() {
+        let link = FakeLink::configured("A", "866207050000001", include_str!("../../testdata/s31-nb-v1.4.0-cfg.txt"));
+        let log = Arc::new(Log::default());
+        link.set_events(log.clone());
+        link.connect("A");
+        let cfg = read_cfg(&link, Duration::from_millis(200), &AtomicBool::new(false)).unwrap();
+        assert_eq!(cfg.get("PWORD"), Some("kxqmzp"), "the reader still gets the real value");
+        link.send("AT+PWORD=neupwx");
+        link.send("AT+PWD=mqtt-geheim");
+        link.send("AT+PIN=349011");
+        read_cfg(&link, Duration::from_millis(200), &AtomicBool::new(false)).unwrap();
+        let lines = lock(&log.0).clone();
+        for secret in ["kxqmzp", "neupwx", "mqtt-geheim", "349011"] {
+            assert!(lines.iter().all(|l| !l.contains(secret)), "{secret} in {lines:?}");
+        }
+        for masked in [">> AT+PWORD=******", ">> AT+PWD=******", "<< AT+PWORD=******", "<< AT+PWD=******"] {
+            assert!(lines.iter().any(|l| l == masked), "{masked} missing in {lines:?}");
+        }
+        assert!(lines.iter().any(|l| l == "<< AT+TDC=900"), "other lines stay as they are");
+        assert!(link.sent().iter().all(|s| !s.contains("neupwx")), "{:?}", link.sent());
     }
 }
