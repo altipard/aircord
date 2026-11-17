@@ -147,6 +147,51 @@ pub(crate) fn read_settings(link: &dyn Link, pin: Option<&str>, wait: Duration, 
     result
 }
 
+/// Why the settings did not come, as far as the form needs to tell the cases apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Failure {
+    /// The device stayed silent or stopped mid-dump: what a device does that waits for its password.
+    Timeout,
+    Refused,
+    /// It answered, but with nothing the form can use.
+    Unusable,
+    Lost,
+    Stopped,
+    Other,
+}
+
+impl Failure {
+    /// Sorts a reason as `transfer::read_cfg` words it. The reason itself names commands and stays in the tooltip
+    /// and the terminal.
+    pub(crate) fn of(why: &str) -> Failure {
+        if why.contains("Keine vollständige Antwort") {
+            Failure::Timeout
+        } else if why.contains("abgelehnt") {
+            Failure::Refused
+        } else if why.contains("keine Einstellungen") || why.contains("kein Gerätemodell") {
+            Failure::Unusable
+        } else if why.contains("Verbindung") {
+            Failure::Lost
+        } else if why.contains("Abgebrochen") {
+            Failure::Stopped
+        } else {
+            Failure::Other
+        }
+    }
+
+    /// The sentence for the person in front of the device.
+    pub(crate) fn text(self) -> &'static str {
+        match self {
+            Failure::Timeout => "Das Gerät hat nicht vollständig geantwortet. Bitte erneut versuchen.",
+            Failure::Refused => "Das Gerät hat die Abfrage abgelehnt. Bitte erneut versuchen.",
+            Failure::Unusable => "Das Gerät hat keine verwertbaren Einstellungen gemeldet.",
+            Failure::Lost => "Die Verbindung zum Gerät ist abgebrochen. Bitte neu verbinden.",
+            Failure::Stopped => "Das Lesen wurde abgebrochen.",
+            Failure::Other => "Die Einstellungen konnten nicht gelesen werden.",
+        }
+    }
+}
+
 /// A scan's signal in bars: at least one for a device that was heard at all.
 fn signal_level(rssi: i16) -> u8 {
     match rssi {
@@ -752,11 +797,12 @@ impl App {
                 if go {
                     self.login();
                 }
+                ui.add_space(2.0);
+                ui.add(small(Failure::of(why).text(), pal().muted)).on_hover_text(why);
             } else {
-                ui.add(Label::new(RichText::new("Die Einstellungen konnten nicht gelesen werden.").color(pal().text)).wrap());
+                // The reason as the device layer words it names commands: that is for the tooltip and the terminal.
+                ui.add(Label::new(RichText::new(Failure::of(why).text()).color(pal().text)).wrap()).on_hover_text(why);
             }
-            ui.add_space(2.0);
-            ui.add(small(why, pal().muted));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if button(ui, Some(Icon::Reload), "Erneut lesen", Tone::Plain).clicked() {
@@ -824,6 +870,24 @@ mod tests {
     use super::*;
 
     const BOOT: &str = include_str!("../../core/testdata/s31-nb-v1.4.0-boot.txt");
+
+    #[test]
+    fn a_read_s_failure_is_said_without_commands() {
+        let cases = [
+            ("Keine vollständige Antwort auf AT+CFG.", Failure::Timeout),
+            ("Das Gerät hat AT+CFG abgelehnt (AT_ERROR).", Failure::Refused),
+            ("AT+CFG hat keine Einstellungen geliefert.", Failure::Unusable),
+            ("AT+CFG nennt kein Gerätemodell (AT+MODEL fehlt).", Failure::Unusable),
+            ("Verbindung verloren.", Failure::Lost),
+            ("Keine Verbindung zum Gerät.", Failure::Lost),
+            ("Abgebrochen.", Failure::Stopped),
+            ("etwas Neues", Failure::Other),
+        ];
+        for (why, kind) in cases {
+            assert_eq!(Failure::of(why), kind, "{why}");
+            assert!(!kind.text().contains("AT"), "{}", kind.text());
+        }
+    }
 
     fn texts(s: &Status) -> Vec<(Mark, String)> {
         status_rows(s).into_iter().map(|r| (r.mark, r.text)).collect()

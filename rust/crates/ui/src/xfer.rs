@@ -63,13 +63,34 @@ fn risk_text(risk: Risk) -> Option<&'static str> {
     }
 }
 
+/// A transfer's reason without the device's vocabulary: the error code and the command names are for the tooltip.
+fn plain_why(why: &str) -> String {
+    if why.contains("abgelehnt") {
+        "Das Gerät hat diesen Wert abgelehnt.".into()
+    } else if !(why.contains("AT+") || why.contains("AT_")) {
+        why.into()
+    } else if why.contains("Lesen") || why.contains("Antwort") || why.contains("geliefert") {
+        "Das Gerät ließ sich danach nicht lesen.".into()
+    } else {
+        "Das Gerät hat nicht wie erwartet geantwortet.".into()
+    }
+}
+
 /// A field's result: its mark and its sentence.
 pub(crate) fn result_text(tpl: &Template, key: &str, status: &Status) -> (Mark, String) {
     match status {
         Status::Verified => (Mark::Ok, "übernommen".into()),
-        Status::Failed { why } => (Mark::Refused, format!("abgelehnt – {why}")),
+        Status::Failed { why } => (Mark::Refused, plain_why(why)),
         Status::Differs { actual } => (Mark::Refused, format!("abgelehnt – das Gerät meldet weiterhin: {}", shown(tpl, key, actual))),
-        Status::Unverified { why } => (Mark::Unsure, format!("nicht bestätigt – {why}")),
+        Status::Unverified { why } => (Mark::Unsure, format!("nicht bestätigt – {}", plain_why(why))),
+    }
+}
+
+/// The reason as the device layer gave it, where the sentence shown leaves something out.
+fn raw_why(status: &Status) -> Option<&str> {
+    match status {
+        Status::Failed { why } | Status::Unverified { why } if plain_why(why) != *why => Some(why),
+        _ => None,
     }
 }
 
@@ -278,7 +299,10 @@ impl App {
                             let (mark, text) = result_text(&t.template, &f.key, &f.status);
                             ui.horizontal_top(|ui| {
                                 widgets::mark(ui, mark);
-                                ui.add(Label::new(RichText::new(format!("{}: {text}", f.label)).color(pal().text)).wrap());
+                                let r = ui.add(Label::new(RichText::new(format!("{}: {text}", f.label)).color(pal().text)).wrap());
+                                if let Some(raw) = raw_why(&f.status) {
+                                    r.on_hover_text(raw);
+                                }
                             });
                         }
                     });
@@ -339,6 +363,13 @@ mod tests {
         let (mark, text) = result_text(&tpl, "TDC", &Status::Differs { actual: "900".into() });
         assert_eq!((mark, text.as_str()), (Mark::Refused, "abgelehnt – das Gerät meldet weiterhin: 15 Minuten"));
         assert_eq!(result_text(&tpl, "TDC", &Status::Unverified { why: "Nicht erneut gelesen.".into() }).0, Mark::Unsure);
+        let refused = Status::Failed { why: "Das Gerät hat den Wert abgelehnt (AT_PARAM_ERROR).".into() };
+        assert_eq!(result_text(&tpl, "TDC", &refused), (Mark::Refused, "Das Gerät hat diesen Wert abgelehnt.".to_string()));
+        assert_eq!(raw_why(&refused), Some("Das Gerät hat den Wert abgelehnt (AT_PARAM_ERROR)."), "the code stays in the tooltip");
+        let unread = Status::Unverified { why: "Erneutes Lesen: Keine vollständige Antwort auf AT+CFG.".into() };
+        assert_eq!(result_text(&tpl, "TDC", &unread).1, "nicht bestätigt – Das Gerät ließ sich danach nicht lesen.");
+        let halted = Status::Failed { why: "Abgebrochen, nicht gesendet.".into() };
+        assert_eq!((result_text(&tpl, "TDC", &halted).1.as_str(), raw_why(&halted)), ("Abgebrochen, nicht gesendet.", None));
         assert_eq!(shown(&tpl, "APN", ""), "leer");
     }
 }

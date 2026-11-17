@@ -551,8 +551,9 @@ fn a_refused_value_is_marked_and_stays_a_change() {
     press(&mut w.h, "Übertragen");
     press(&mut w.h, "Jetzt übertragen");
     wait(&mut w.h, "the result", |a| matches!(a.transfer.as_ref().map(|t| &t.stage), Some(Stage::Done(_))));
-    assert!(has_part(&w, "Sendeintervall: abgelehnt"), "the refusal is named");
-    assert!(has_part(&w, "AT_PARAM_ERROR"), "with the device's reason");
+    assert!(has(&w, "Sendeintervall: Das Gerät hat diesen Wert abgelehnt."), "the refusal is named");
+    assert!(!has_part(&w, "AT_") && !has_part(&w, "AT+"), "and the device's code stays out of the lay view");
+    assert!(logged(w.h.state(), "AT_PARAM_ERROR"), "the expert's terminal keeps it");
     assert!(!has(&w, "Neu starten, damit alle Änderungen wirken?"));
     press(&mut w.h, "Schließen");
     assert!(has(&w, "1 Änderung"), "the entry stays, to be corrected");
@@ -807,6 +808,8 @@ fn nothing_is_transferred_over_settings_that_are_not_fresh() {
     wait(&mut w.h, "the failed read", |a| matches!(a.guided.read, Read::Failed(_)));
     run(&mut w.h);
     assert!(has(&w, "1 Änderung") && has_part(&w, "zuerst die Einstellungen neu lesen"));
+    assert!(has(&w, "Das Gerät hat die Abfrage abgelehnt. Bitte erneut versuchen."));
+    assert!(!has_part(&w, "AT_") && !has_part(&w, "AT+"), "no command names in the lay view");
     press(&mut w.h, "Übertragen");
     assert!(w.h.state().transfer.is_none(), "the button is off");
     w.h.state_mut().review_transfer();
