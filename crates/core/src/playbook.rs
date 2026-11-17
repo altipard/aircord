@@ -261,7 +261,7 @@ pub fn compile_wait(pattern: &str) -> Pattern {
 
 fn risky_re() -> Option<&'static Regex> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
-    // `(?-u:\b)`: an ASCII word boundary, as Go's `\b` is.
+    // `(?-u:\b)`: an ASCII word boundary, so a non-ASCII character right after the command still ends it.
     RE.get_or_init(|| Regex::new(r"(?i)^AT(Z|\+(FDR|FACNEW|FACTORY|RESET|REBOOT|CFACTORY|QRST))(?-u:\b)").ok()).as_ref()
 }
 

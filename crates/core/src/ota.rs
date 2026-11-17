@@ -51,7 +51,7 @@ The .bin must be the application only, without the bootloader.";
 
 fn imei_re() -> Option<&'static Regex> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
-    // ASCII classes on purpose: Rust's `\d` is any Unicode digit, Go's only 0-9.
+    // ASCII classes on purpose: Rust's `\d` is any Unicode digit, an IMEI only 0-9.
     RE.get_or_init(|| Regex::new(r"(?i)IMEI[^0-9]{0,8}([0-9]{15})").ok()).as_ref()
 }
 

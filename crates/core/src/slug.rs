@@ -2,7 +2,7 @@
 
 /// A file name stem for `name` that cannot escape its directory: lower-cased, every run of characters outside
 /// `[a-z0-9._-]` turned into `-`, leading and trailing `-` and `.` stripped, at most 80 bytes; `fallback` when nothing is
-/// left. The same rule as the Go build, so both find each other's files.
+/// left. The same rule as earlier releases, so files they saved are found again.
 pub fn slug(name: &str, fallback: &str) -> String {
     let lower = name.trim().to_lowercase();
     let mut out = String::with_capacity(lower.len());

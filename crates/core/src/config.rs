@@ -11,7 +11,7 @@ const APP_DIR: &str = "aircord";
 const LEGACY_DIR: &str = "blescan";
 
 /// The app's config directory: the OS user-config dir (`~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or
-/// `~/.config` on Linux), the same one the Go build uses, so both read the same files. Without one it falls back to the
+/// `~/.config` on Linux), the same one earlier releases used, so their files carry over. Without one it falls back to the
 /// temp dir, never the working directory, which is unpredictable for a double-clicked app.
 pub fn root() -> PathBuf {
     dirs::config_dir().unwrap_or_else(std::env::temp_dir).join(APP_DIR)
