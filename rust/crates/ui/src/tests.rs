@@ -648,6 +648,20 @@ fn a_device_that_keeps_its_settings_back_is_asked_for_the_password() {
 }
 
 #[test]
+fn a_template_s_secret_is_masked_in_what_the_terminal_already_holds() {
+    let mut w = world_with(FakeLink::console("aa", "Sensor 7"), &[("x1.toml", X1)]);
+    connected(&mut w, "Sensor 7");
+    let app = w.h.state_mut();
+    for line in ["<< AT+TOKEN=tok-abc", ">> at+token=tok-neu", "-- note: TOKEN=frei --"] {
+        app.log_line(line);
+    }
+    app.pick_template(Some("Prüfgerät X1".into()));
+    assert!(logged(app, "<< AT+TOKEN=******") && logged(app, ">> at+token=******"), "typed in either case");
+    assert!(logged(app, "-- note: TOKEN=frei --"), "a line without a command is not touched");
+    assert!(!app.log_text().contains("tok-"));
+}
+
+#[test]
 fn the_status_line_and_an_error_mask_what_the_terminal_masks() {
     let mut w = world_with(FakeLink::configured("aa", "X1-NB", X1_CFG), &[("x1.toml", X1)]);
     connected(&mut w, "X1-NB");

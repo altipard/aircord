@@ -368,9 +368,14 @@ impl App {
         if secrets != self.secrets {
             self.secrets = secrets;
             if !self.secrets.is_empty() {
-                let lines: Vec<String> = self.log.iter().map(|l| self.masked(&l.text)).collect();
+                // Only a line with a command in it can hold a value to mask; the rest of a long log is left alone.
+                // Commands are typed in either case.
+                let has_command = |text: &str| text.as_bytes().windows(3).any(|w| w.eq_ignore_ascii_case(b"AT+"));
+                let lines: Vec<Option<String>> = self.log.iter().map(|l| has_command(&l.text).then(|| self.masked(&l.text))).collect();
                 for (line, text) in self.log.iter_mut().zip(lines) {
-                    line.text = text;
+                    if let Some(text) = text {
+                        line.text = text;
+                    }
                 }
             }
         }
