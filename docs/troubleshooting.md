@@ -49,7 +49,7 @@ after the PIN has been accepted.
 If the link dropped during that window you get:
 
 ```
--- PIN skipped: link dropped during init --
+-- link dropped during init --
 ```
 
 Reconnect. If the device needs longer than four seconds, send the PIN by hand
