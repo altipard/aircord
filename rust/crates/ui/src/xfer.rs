@@ -242,6 +242,12 @@ impl App {
 
     /// Sends the template's restart, after the person said yes in the result dialog: that question is the confirmation.
     pub(crate) fn restart_device(&mut self, cmd: String) {
+        // The link can go between the result and the answer to it: then nothing was sent, and saying so beats a
+        // "restarting" that never happens.
+        if !self.connected() || !self.link.is_connected() {
+            self.guided.notice.warn("Keine Verbindung – das Gerät wurde nicht neu gestartet. Bitte neu verbinden.");
+            return;
+        }
         self.restarting = true;
         self.confirmed(Pending::Send(cmd));
         self.guided.notice.ok("Das Gerät startet neu. Die Verbindung endet dabei – danach bitte neu verbinden.");

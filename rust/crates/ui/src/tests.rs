@@ -648,6 +648,18 @@ fn a_device_that_keeps_its_settings_back_is_asked_for_the_password() {
 }
 
 #[test]
+fn a_restart_without_a_link_says_so_and_sends_nothing() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    w.link.drop_link();
+    wait(&mut w.h, "the drop", |a| a.conn == Conn::Idle);
+    w.h.state_mut().restart_device("ATZ".into());
+    run(&mut w.h);
+    assert!(w.sent().is_empty());
+    assert!(has_part(&w, "Keine Verbindung") && !has_part(&w, "startet neu"));
+}
+
+#[test]
 fn an_answer_that_is_no_settings_does_not_ask_for_the_password() {
     for reply in [&["AT_ERROR"][..], &["AT+TDC=900", "OK"], &["OK"]] {
         let link = FakeLink::console("aa", "Sensor 7");
