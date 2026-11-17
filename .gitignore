@@ -1,11 +1,3 @@
-# Build output
-/bin/
-/aircord
-# Legacy binary names (pre-rename)
-/blescan
-/blescan-app
-/ble-console
-
 # Cargo build output
 /target/
 

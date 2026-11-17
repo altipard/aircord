@@ -15,3 +15,18 @@ aircord-core = { workspace = true }
 aircord-ble = { workspace = true }
 aircord-ui = { workspace = true }
 eframe = { workspace = true }
+
+# macOS app bundle for `cargo bundle` (driven by packaging/package.sh). The version is not set here: the
+# packaging script writes the release tag into Info.plist after bundling.
+[package.metadata.bundle]
+name = "Aircord"
+identifier = "com.altipard.aircord"
+icon = ["../../assets/icon.png"]
+category = "public.app-category.developer-tools"
+short_description = "The serial console for devices that no longer have a serial port"
+copyright = "MIT License"
+
+[package.metadata.bundle.osx]
+minimum_system_version = "11.0"
+# Without a Bluetooth usage description macOS terminates a bundled app on its first CoreBluetooth call.
+info_plist_exts = ["../../packaging/macos/Info.plist.ext"]

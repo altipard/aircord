@@ -3,10 +3,6 @@
 # List tasks:          task
 version: "3"
 
-vars:
-  BINARY: aircord
-  BIN_DIR: bin
-
 tasks:
   default:
     desc: List available tasks
@@ -14,64 +10,53 @@ tasks:
       - task --list
     silent: true
 
-  tidy:
-    desc: Sync go.mod / go.sum
-    cmds:
-      - go mod tidy
-
   fmt:
-    desc: Format all Go source
+    desc: Format all Rust source
     cmds:
-      - gofmt -w .
+      - cargo fmt --all
 
   fmt:check:
-    desc: Fail if any file is not gofmt-clean
+    desc: Fail if any file is not rustfmt-clean
     cmds:
-      - test -z "$(gofmt -l .)" || (echo 'gofmt needed:' && gofmt -l . && exit 1)
-
-  vet:
-    desc: Run go vet
-    cmds:
-      - go vet ./...
+      - cargo fmt --all --check
 
   lint:
-    desc: Run golangci-lint (pinned, no install needed)
+    desc: Run clippy on every crate and target, warnings are errors
     cmds:
-      - go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
+      - cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     desc: Run tests
     cmds:
-      - go test ./...
+      - cargo test --workspace
+
+  check:
+    desc: CI gate — format check, clippy, test
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: test
 
   build:
-    desc: Build the binary into ./bin
+    desc: Build the release binary into target/release
     cmds:
-      - go build -o {{.BIN_DIR}}/{{.BINARY}} .
+      - cargo build --release -p aircord
 
   run:
     desc: Build and run the app
     cmds:
-      - go run .
+      - cargo run -p aircord
 
   package:
-    desc: Build a native app bundle (macOS .app, Linux .tar.xz, Windows .exe)
+    desc: Build the native package for this OS into dist/ (macOS .app.zip, Linux .tar.xz, Windows .exe)
     # A bare binary started from a shell shows the launching process's icon in
     # the macOS Dock. Only the bundle carries the app's own icon and identity.
-    # The CLI rewrites FyneApp.toml and bumps Build on every run.
+    # macOS needs cargo-bundle: cargo install cargo-bundle --locked
     cmds:
-      - go run fyne.io/tools/cmd/fyne@latest package
+      - bash packaging/package.sh
 
   clean:
-    desc: Remove build output and legacy binaries
+    desc: Remove build output and packages
     cmds:
-      - rm -rf {{.BIN_DIR}}
-      - rm -f blescan blescan-app ble-console {{.BINARY}}
-
-  check:
-    desc: CI gate — format check, vet, lint, test
-    cmds:
-      - task: fmt:check
-      - task: vet
-      - task: lint
-      - task: test
+      - cargo clean
+      - rm -rf dist
