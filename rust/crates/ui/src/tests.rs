@@ -472,7 +472,7 @@ fn the_rail_names_its_dialogs() {
     }
 }
 
-/// Renders the window in both themes to PNGs under `$AIRCORD_SHOTS` (default: the system temp dir).
+/// Renders the window in both themes to PNGs under `$AIRCORD_SHOTS` (default: `aircord-guided` in the system temp dir), at the smallest window size.
 // ---------- the guided view ----------
 
 #[test]
@@ -665,6 +665,40 @@ fn the_password_typed_before_connecting_unlocks_and_the_status_card_fills() {
     w.h.state_mut().feed_status("[30100]Signal Strength:17");
     run(&mut w.h);
     assert!(has(&w, "Netz gut · Band 8,20") && !has(&w, NO_NETWORK_HINT));
+}
+
+#[test]
+fn a_secret_of_a_template_found_by_the_model_is_masked_from_its_first_line() {
+    // Nothing in the name picks the template: it is known only once the dump names the model.
+    let mut w = lay(FakeLink::configured("aa", S31_NAME, X1_CFG), &[("x1.toml", X1)]);
+    lay_connected(&mut w, S31_NAME);
+    assert_eq!(w.h.state().template.as_deref(), Some("Prüfgerät X1"));
+    let text = w.h.state().log_text();
+    assert!(text.contains("<< AT+TOKEN=******") && !text.contains("tok-abc"), "{text}");
+    assert!(has(&w, "Zugangsschlüssel") && !has_part(&w, "tok-abc"));
+}
+
+#[test]
+fn a_playbook_takes_the_link_from_a_read_under_way() {
+    let link = FakeLink::console("aa", "Sensor 7");
+    // A device that takes its time with the dump.
+    link.reply_late("AT+CFG", Duration::from_millis(250), &["AT+MODEL=ZZ9-XX,v0.1.0", "AT+TDC=60", "OK"]);
+    let mut w = world(link);
+    press(&mut w.h, "Scan");
+    press(&mut w.h, "Stop");
+    press(&mut w.h, "Sensor 7");
+    press(&mut w.h, "Connect");
+    wait(&mut w.h, "the connection", |a| matches!(a.conn, Conn::Connected { .. }));
+    assert_eq!(w.h.state().guided.read, Read::Reading);
+    w.h.state_mut().interrupt_read();
+    assert_eq!(w.h.state().guided.read, Read::Idle);
+    std::thread::sleep(Duration::from_millis(700));
+    run(&mut w.h);
+    assert_eq!(w.h.state().guided.read, Read::Idle, "the stopped read's late result is dropped");
+    press(&mut w.h, "Einstellungen");
+    press(&mut w.h, "Jetzt lesen");
+    wait(&mut w.h, "the read", |a| a.guided.read == Read::Ready);
+    assert!(has(&w, "ZZ9-XX"));
 }
 
 #[test]

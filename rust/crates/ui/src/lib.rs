@@ -467,6 +467,7 @@ impl App {
                 if let Some(reply) = line.strip_prefix("<< ") {
                     self.try_capture(reply);
                     self.feed_status(reply);
+                    self.on_model_line(reply);
                 }
                 self.log_line(line);
             }
@@ -615,6 +616,9 @@ impl App {
             }
             // The PIN first, if there is one, then the settings: the guided view's form, and the model for the template.
             let result = guided::read_settings(&*link, Some(pin.as_str()).filter(|p| !p.is_empty()), read_wait, &stop);
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
             out.post(Msg::Status(format!("connected: {}", sel.name)));
             out.post(Msg::Cfg { epoch, result });
         });

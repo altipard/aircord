@@ -148,15 +148,20 @@ impl App {
 
     /// Sends the reviewed changes, on a thread of its own.
     pub(crate) fn start_transfer(&mut self) {
-        let Some(t) = &mut self.transfer else { return };
-        if !matches!(t.stage, Stage::Review) {
+        if !matches!(self.transfer, Some(Transfer { stage: Stage::Review, .. })) {
             return;
         }
-        if !self.link.is_connected() {
+        let busy = self.running.is_some() || self.ota_running() || self.guided.read == crate::guided::Read::Reading;
+        if busy || !self.link.is_connected() {
             self.transfer = None;
-            self.guided.notice.warn("Keine Verbindung zum Gerät. Bitte neu verbinden.");
+            self.guided.notice.warn(if busy {
+                "Das Gerät ist gerade beschäftigt. Bitte gleich noch einmal übertragen."
+            } else {
+                "Keine Verbindung zum Gerät. Bitte neu verbinden."
+            });
             return;
         }
+        let Some(t) = &mut self.transfer else { return };
         t.stage = Stage::Running { step: "Die Übertragung beginnt …".into(), part: 0.0 };
         let (tpl, changes, stop) = (Arc::clone(&t.template), t.changes.clone(), Arc::clone(&t.stop));
         let (link, out, wait) = (Arc::clone(&self.link), self.outbox(), self.timing.read_wait);

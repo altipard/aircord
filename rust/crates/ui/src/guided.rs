@@ -445,16 +445,45 @@ impl App {
 
     /// Reads the settings again, after `pin` if one is given.
     fn spawn_read(&mut self, pin: Option<String>) {
-        if !self.connected() || self.guided.read == Read::Reading {
+        if !self.connected() || self.guided.read == Read::Reading || self.transfer_running() {
+            return;
+        }
+        if self.running.is_some() || self.ota_running() {
+            self.guided
+                .notice
+                .warn("Im Experten-Reiter läuft gerade ein Playbook oder ein Firmware-Update. Bitte warten, bis es fertig ist.");
             return;
         }
         self.guided.read = Read::Reading;
+        self.epoch += 1;
+        self.read_stop = Arc::new(AtomicBool::new(false));
         let (link, out, wait, epoch, stop) =
             (Arc::clone(&self.link), self.outbox(), self.timing.read_wait, self.epoch, Arc::clone(&self.read_stop));
         std::thread::spawn(move || {
             let result = read_settings(&*link, pin.as_deref(), wait, &stop);
             out.post(Msg::Cfg { epoch, result });
         });
+    }
+
+    /// Ends a read that is under way, before another job takes the link: a playbook's step would take the dump's `OK`
+    /// for its own, and a firmware update's bootloader must not be sent `AT+CFG`. Its late result is dropped.
+    pub(crate) fn interrupt_read(&mut self) {
+        if self.guided.read == Read::Reading {
+            self.read_stop.store(true, Ordering::Relaxed);
+            self.epoch += 1;
+            self.guided.read = Read::Idle;
+            self.log_line("-- reading the settings stopped: another job needs the link --");
+        }
+    }
+
+    /// The model line of a dump, as it arrives: the template is switched at once, so its secrets further down the
+    /// dump are masked before they reach the terminal.
+    pub(crate) fn on_model_line(&mut self, reply: &str) {
+        let Some(model) = reply.trim().strip_prefix("AT+MODEL=") else { return };
+        let by_model = self.stores.templates.for_model(model.trim()).map(|t| t.name.clone());
+        if self.connected() && by_model.is_some() && by_model != self.template {
+            self.set_template(by_model);
+        }
     }
 
     pub(crate) fn read_again(&mut self) {
@@ -635,7 +664,19 @@ impl App {
             self.status_card(ui);
             ui.add_space(2.0);
             match self.guided.read.clone() {
-                Read::Idle | Read::Reading => {
+                Read::Idle => {
+                    widgets::card().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        widgets::section(ui, "Einstellungen");
+                        ui.add_space(4.0);
+                        ui.add(Label::new(RichText::new("Die Einstellungen wurden noch nicht gelesen.").color(pal().text)).wrap());
+                        ui.add_space(6.0);
+                        if button(ui, Some(Icon::Reload), "Jetzt lesen", Tone::Primary).clicked() {
+                            self.read_again();
+                        }
+                    });
+                }
+                Read::Reading => {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
                         ui.spinner();
