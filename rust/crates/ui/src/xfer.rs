@@ -91,17 +91,26 @@ impl App {
         let Some(form) = &self.guided.form else { return };
         let (n, valid) = form.summary();
         let free = !self.transfer_running();
+        // Only what was just read is a "before" to show and to compare against.
+        let fresh = self.guided.read == crate::guided::Read::Ready;
         let (mut go, mut reset) = (false, false);
         ui.horizontal(|ui| {
             ui.set_min_height(30.0);
             ui.label(RichText::new(count_text(n)).font(style::medium(13.0)).color(if n > 0 { pal().text } else { pal().muted }));
-            if !valid {
+            if !fresh {
+                ui.label(RichText::new("– bitte zuerst die Einstellungen neu lesen").color(pal().warn));
+            } else if !valid {
                 ui.label(RichText::new("– bitte zuerst die rot markierten Eingaben berichtigen").color(pal().error));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let can = n > 0 && valid && free;
-                let tip =
-                    if n == 0 { "Erst etwas ändern, dann übertragen" } else { "Zeigt die Änderungen und sendet sie nach Bestätigung" };
+                let can = n > 0 && valid && free && fresh;
+                let tip = if !fresh {
+                    "Die Einstellungen des Geräts sind nicht aktuell. Oben rechts neu lesen."
+                } else if n == 0 {
+                    "Erst etwas ändern, dann übertragen"
+                } else {
+                    "Zeigt die Änderungen und sendet sie nach Bestätigung"
+                };
                 go = ui
                     .add_enabled_ui(can, |ui| button(ui, Some(Icon::Play), "Übertragen", Tone::Primary))
                     .inner
@@ -128,6 +137,10 @@ impl App {
     /// Opens the dialog on what the form would send.
     pub(crate) fn review_transfer(&mut self) {
         let Some(form) = &self.guided.form else { return };
+        if self.guided.read != crate::guided::Read::Ready {
+            self.guided.notice.warn("Bitte zuerst die Einstellungen neu lesen.");
+            return;
+        }
         match form.plan() {
             Ok(changes) if !changes.is_empty() => {
                 self.guided.notice.clear();

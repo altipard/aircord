@@ -764,6 +764,23 @@ fn a_pin_is_not_sent_to_the_device_connected_next() {
 }
 
 #[test]
+fn nothing_is_transferred_over_settings_that_are_not_fresh() {
+    let mut w = lay(s31(), &[]);
+    lay_connected(&mut w, S31_NAME);
+    press(&mut w.h, "Sendeintervall: 15 Minuten");
+    press(&mut w.h, "1 Stunde");
+    w.link.reply("AT+CFG", &["AT_ERROR"]);
+    press(&mut w.h, "Einstellungen neu lesen");
+    wait(&mut w.h, "the failed read", |a| matches!(a.guided.read, Read::Failed(_)));
+    run(&mut w.h);
+    assert!(has(&w, "1 Änderung") && has_part(&w, "zuerst die Einstellungen neu lesen"));
+    press(&mut w.h, "Übertragen");
+    assert!(w.h.state().transfer.is_none(), "the button is off");
+    w.h.state_mut().review_transfer();
+    assert!(w.h.state().transfer.is_none(), "and the dialog does not open another way");
+}
+
+#[test]
 fn a_playbook_takes_the_link_from_a_read_under_way() {
     let link = FakeLink::console("aa", "Sensor 7");
     // A device that takes its time with the dump.
