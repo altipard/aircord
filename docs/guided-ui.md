@@ -1,0 +1,61 @@
+# Gerät einstellen ohne Befehle
+
+Aircord öffnet mit dem Reiter **Einstellungen**. Dort wird ein Gerät über ein Formular eingestellt; AT-Befehle muss
+niemand kennen. Die bisherige Ansicht mit Terminal, Bedienfeld, Playbooks, Sessions und Firmware liegt unverändert im
+Reiter **Experte**.
+
+## In vier Schritten
+
+1. **Suchen** drücken. Links erscheinen die Geräte in der Nähe als Karten, mit Signalbalken. Das Gerät muss
+   eingeschaltet sein. Die Adresse eines Geräts steht im Tooltip der Karte.
+2. Gerät anklicken, **Verbinden** drücken. Aircord liest die Einstellungen selbst aus und zeigt oben Modell und
+   Firmware.
+3. Werte im Formular ändern. Ein Punkt vor dem Namen markiert, was vom Gerät abweicht; der Pfeil daneben setzt das
+   Feld zurück. Unten steht, wie viele Änderungen anstehen.
+4. **Übertragen** drücken. Ein Dialog zeigt jede Änderung als Vorher und Nachher. Erst nach der Bestätigung wird
+   gesendet.
+
+## Das Ergebnis
+
+Nach der Übertragung liest Aircord das Gerät noch einmal und meldet je Einstellung:
+
+- **übernommen** – der Wert steht so im Gerät.
+- **abgelehnt** – das Gerät hat den Wert nicht angenommen; der Grund steht dabei. Die Eingabe bleibt im Formular und
+  kann berichtigt werden.
+- **nicht bestätigt** – gesendet, aber das Gerät ließ sich danach nicht lesen. Mit dem Kreispfeil oben rechts neu
+  lesen.
+
+Manche Einstellungen wirken erst nach einem Neustart. Dann fragt Aircord „Neu starten, damit alle Änderungen
+wirken?“. Bei **Ja** startet das Gerät neu und die Verbindung endet; nach etwa einer Minute lässt es sich wieder
+verbinden. Bei **Später** bleibt alles, wie es ist. Aircord startet ein Gerät nie von selbst neu.
+
+## Status
+
+Die Statuskarte zeigt, was das Gerät beim Start gemeldet hat: Passwort angenommen, SIM-Karte erkannt, Netz mit
+Funkband, Zugangspunkt gesetzt. Meldet das Gerät mehrere Minuten lang kein Netz, erscheint der Hinweis „Kein Netz –
+Antenne angeschraubt? Gerät näher ans Fenster?“.
+
+## Passwort
+
+Ein Passwortfeld erscheint nur, wenn das Gerät seine Einstellungen nicht herausgibt. Das Passwort steht auf dem
+Etikett des Geräts. Es wird verdeckt eingegeben und erscheint weder im Terminal noch in gespeicherten Protokollen
+oder im Befehlsverlauf.
+
+Passwortfelder im Formular sind leer. Leer heißt: unverändert. Wo ein Passwort gelöscht werden darf, gibt es dafür
+den Knopf **Löschen**.
+
+## Weitere Einstellungen
+
+Unter den Karten klappt **Weitere Einstellungen** die selten gebrauchten Werte auf. Im Normalfall bleiben sie, wie
+sie sind.
+
+## Warnungen
+
+Vor Änderungen, die das Gerät vom Netz oder von seinem Server trennen können, warnt der Dialog: „Das Gerät kann
+danach das Netz verlieren“. Ein falscher Wert lässt sich dann nur noch vor Ort beheben. Ein geändertes
+Gerätepasswort lässt sich nicht zurückholen.
+
+## Wenn es kein Formular gibt
+
+Kennt Aircord das Modell nicht, steht dort ein Hinweis mit dem Knopf **Experten-Ansicht öffnen**. Dort lässt sich
+das Gerät wie bisher über Befehle einstellen.
