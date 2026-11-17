@@ -52,6 +52,25 @@ pub fn redact_line<'a>(line: &'a str, extra: &[&str]) -> Cow<'a, str> {
     re.replace_all(line, format!("${{1}}{MASK}").as_str())
 }
 
+/// Which way a line went over the link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    /// From the app to the device: `>> `.
+    Sent,
+    /// From the device: `<< `.
+    Received,
+}
+
+/// A line as a link logs it: `>> ` or `<< ` and the line with every always-secret value masked. Every [`crate::link::Link`]
+/// logs through it, so the terminal and a saved transcript never show `AT+PWORD` in clear, whichever link wrote it.
+pub fn log_line(direction: Direction, line: &str) -> String {
+    let prefix = match direction {
+        Direction::Sent => ">> ",
+        Direction::Received => "<< ",
+    };
+    format!("{prefix}{}", redact_line(line, &[]))
+}
+
 /// Whether `cmd` sets a secret, so it goes out through [`crate::link::Link::send_secret`] and its echo is masked.
 pub fn is_secret_command(cmd: &str, extra: &[&str]) -> bool {
     matches!(redact_line(cmd, extra), Cow::Owned(_))
@@ -70,6 +89,15 @@ mod tests {
         assert_eq!(redact_line(">> AT+PIN=349011", &[]), ">> AT+PIN=******", "the label's form of the password");
         assert_eq!(redact_line("AT+PWD=NULL", &[]), "AT+PWD=******", "even an empty one");
         assert_eq!(redact_line("AT+PWORD=abc\r", &[]), "AT+PWORD=******\r");
+    }
+
+    #[test]
+    fn a_logged_line_has_its_direction_and_no_password() {
+        assert_eq!(log_line(Direction::Sent, "AT+PWD=mqtt-geheim"), ">> AT+PWD=******");
+        assert_eq!(log_line(Direction::Received, "AT+PWORD=kxqmzp"), "<< AT+PWORD=******");
+        assert_eq!(log_line(Direction::Received, "AT+TDC=900"), "<< AT+TDC=900");
+        assert_eq!(log_line(Direction::Sent, "AT+CFG"), ">> AT+CFG");
+        assert_eq!(log_line(Direction::Received, ""), "<< ");
     }
 
     #[test]

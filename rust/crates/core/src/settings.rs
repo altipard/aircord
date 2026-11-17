@@ -175,7 +175,9 @@ pub struct Setting {
     pub visible_if: Option<Condition>,
     /// Shown only in expert mode.
     pub expert: bool,
-    /// An empty input clears the value: the device gets `AT+<key>=NULL`, as `AT+CFG` prints an unset value.
+    /// The value may be cleared: the device gets `AT+<key>=NULL`, as `AT+CFG` prints an unset value. For text an empty
+    /// input clears it; a secret only by an explicit clear ([`crate::transfer::plan_clearing`]), since an empty password
+    /// field means "unchanged".
     pub clearable: bool,
     /// Positions (from 1) of comma-separated parts of a typed value that must differ: `[2, 3]` refuses
     /// `AT+POWER_SAVE=0,8,8`, a window that starts where it ends.
@@ -371,6 +373,16 @@ fn parse_int(input: &str) -> Option<i64> {
     input.trim().parse().ok()
 }
 
+/// Keys whose value is a comma-separated list the firmware prints without spaces: `AT+DNSCFG="8.8.8.8","8.8.4.4"`
+/// (S31-NB v1.4.0, `docs/devices/s31-nb-cfg-sample.md`). Whether it also takes spaces is untested, so it gets the form it
+/// prints. Only listed keys: in other text (an MQTT topic, a user name) a space after a comma may be part of the value.
+const SPACELESS_LISTS: &[&str] = &["DNSCFG"];
+
+/// A checked value in the form the device prints it.
+fn device_form(key: &str, value: String) -> String {
+    if SPACELESS_LISTS.contains(&key) { value.split(',').map(str::trim).collect::<Vec<_>>().join(",") } else { value }
+}
+
 /// How a wanted value is compared with what the device reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Compare {
@@ -442,7 +454,8 @@ impl Setting {
 
     /// Checks an entered value and returns what is sent, or why not in words for the person in the field. A secret's
     /// message never repeats the input. For a `clearable` setting an empty input is fine and comes back empty, which
-    /// [`crate::transfer`] sends as `NULL`.
+    /// [`crate::transfer`] sends as `NULL`; for a secret it only gets here from an explicit clear, because
+    /// [`crate::transfer::plan`] takes an empty secret as unchanged.
     pub fn check(&self, input: &str) -> Result<String, String> {
         if input.contains(['\r', '\n']) {
             return Err("Zeilenumbrüche sind nicht erlaubt.".into());
@@ -472,7 +485,7 @@ impl Setting {
             }
             Ok(v.to_string())
         };
-        match &self.field {
+        let checked = match &self.field {
             Field::Duration { unit, min, max, .. } => {
                 let Some(n) = parse_int(v) else { return Err("Bitte eine ganze Zahl eingeben.".into()) };
                 if n < 0 {
@@ -517,7 +530,8 @@ impl Setting {
             Field::Toggle { on, off } if v == on || v == off => Ok(v.to_string()),
             Field::Toggle { .. } => Err("Bitte ein- oder ausschalten.".into()),
             Field::Text { pattern, max_len } | Field::Secret { pattern, max_len } => check_text(pattern, max_len),
-        }
+        };
+        checked.map(|v| device_form(&self.key, v))
     }
 }
 
@@ -601,6 +615,15 @@ mod tests {
         let secret = ok("key = \"TOKEN\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"secret\"");
         assert!(!secret.same("\"x\"", "x"), "a secret is compared exactly");
         assert_eq!(secret.compare(), Compare::Exact);
+    }
+
+    #[test]
+    fn dns_servers_go_out_without_spaces_other_text_as_entered() {
+        let dns = ok("key = \"DNSCFG\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"");
+        assert_eq!(dns.check(" \"1.1.1.1\" ,  \"8.8.4.4\" ").unwrap(), "\"1.1.1.1\",\"8.8.4.4\"");
+        assert_eq!(dns.check("\"1.1.1.1\"").unwrap(), "\"1.1.1.1\"");
+        let topic = ok("key = \"PUBTOPIC\"\nlabel = \"x\"\ngroup = \"g\"\ntype = \"text\"");
+        assert_eq!(topic.check("a, b").unwrap(), "a, b", "only the listed keys");
     }
 
     #[test]

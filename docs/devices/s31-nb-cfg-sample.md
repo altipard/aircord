@@ -37,7 +37,8 @@ Currently set frequency band: 8,20
 
 Die Zeile `Signal Strength:<n>` wiederholt das Gerät etwa alle 10 Sekunden.
 `99` heißt kein Netz; Werte 0–31 sind laut Inventar die übliche CSQ-Skala (im
-Test nicht beobachtet). Die Zeile mit dem Band hat keinen Zeitstempel.
+zweiten Test mit `17` beobachtet, siehe [Upload](#erfolgreicher-upload)). Die
+Zeile mit dem Band hat keinen Zeitstempel.
 
 ## `AT+CFG`
 
@@ -84,6 +85,52 @@ OK
 
 Die leeren Zeilen nach `AT+SERVADDR` und vor `OK` stehen so in der Ausgabe.
 
+## Erfolgreicher Upload
+
+Dasselbe Gerät am selben Tag (19:52), diesmal mit angeschraubter Antenne. Ohne
+Antenne blieb das Signal bei `99`, das war die Ursache im ersten Test. Die SIM
+war laut 1NCE-Portal aktiv, ohne IMEI-Sperre, eingebucht über Telekom.de.
+Mitschnitt ab der IMSI-Zeile, ohne Befehl:
+
+```text
+[22688]The IMSI number is:901405100000001.
+[22734]Password Correct
+[24262]Set the data format for sending and receiving.
+Currently set frequency band: 8,20
+[26959]Set APN successfully
+[28990]Exit sleep mode
+[33617]Signal Strength:17
+[38851]Network Information:"RSSI:-80","SINR:5","BAND:8"
+[40212]PSM mode configured
+[41544]DNS configuration is successful
+[45889]Resolving domain name...
+[48925]Domain IP:10.60.2.239,4445
+[51888]*****Upload start:0*****
+[51923]remaining battery =3541 mv
+[51963]DS18B20(1) temp is -409.5
+[52067]adc_mV(1):0.00
+[52193]Humidity =46.08 %rh
+[52223]tem =23.56 C
+[53761]Open a Socket Service successfully
+[57841]Upload data successfully
+[60880]Datagram is sent by RF
+[62414]Close the port successfully
+[63453]Send complete
+[64477]*****End of upload*****
+```
+
+Dieselbe Ausgabe steht in `rust/crates/core/testdata/s31-nb-v1.4.0-upload.txt`.
+Die Zeile `PSM mode configured` endet dort wie im Original mit einem
+Leerzeichen.
+
+- `DS18B20(1) temp is -409.5`: Es war kein externer Fühler angeschlossen.
+  `-409.5` ist der Platzhalterwert, keine Temperatur.
+- `Humidity` und `tem` stammen vom eingebauten Sensor, `remaining battery` ist
+  die Batteriespannung in mV.
+- Eine Fehlermeldung im Upload-Block wurde nicht beobachtet. Aircord wertet
+  einen Block als fehlgeschlagen, wenn er ohne `Upload data successfully`,
+  `Datagram is sent by RF` oder `Send complete` endet.
+
 ## Folgerungen
 
 Das beantwortet die offenen Punkte 1, 2 und 9 des Inventars
@@ -103,6 +150,9 @@ Das beantwortet die offenen Punkte 1, 2 und 9 des Inventars
 - **Band** steht nicht in `AT+CFG`, nur im Startbanner. Das Setzen per
   `AT+QBAND` ist nicht getestet und fehlt deshalb im Preset.
 - **Statuskarte:** Modul, IMEI, IMSI, Band, APN gesetzt und Signal kommen aus dem
-  Startbanner, ohne Befehl.
+  Startbanner, ohne Befehl. Netzdetails (RSSI, SINR, Band), der Weg zum Server
+  und jeder Upload mit Batterie und Messwerten kommen aus den Zeilen, die das
+  Gerät selbst ausgibt (`banner::NodeStatus`). Die Einstufung der Batterie
+  (ab 3,3 V gut, ab 3,1 V schwach) ist eine Annahme und noch nicht geprüft.
 - Nicht in der Ausgabe: `AT+TR` (Messintervall). Das Preset bietet es für das
   S31-NB deshalb nicht an.
