@@ -65,7 +65,7 @@ input entirely. Wait for the current activity to finish and retry.
 ## A playbook aborts
 
 ```
--- playbook … aborted at step 3/7 (AT+APN=…): no reply matching OK --
+!! playbook … aborted at step 3/7 (AT+APN=…): no reply matching OK
 ```
 
 The step waited 15 seconds without a matching reply.
