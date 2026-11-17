@@ -5,9 +5,16 @@ buttons, input fields, dropdowns and read-outs. The point is that the person
 configuring a sensor should not have to remember whether the uplink interval is
 `AT+TDC=` or `AT+TXP=`.
 
+A template can also describe the device's **settings** as typed fields
+(`[[setting]]`): Aircord reads the current values with `AT+CFG`, shows them as a
+form, sends only what changed and reads `AT+CFG` again to check the result. See
+[Settings](#settings).
+
 Templates are TOML. Aircord ships presets inside the binary, and reads your own
 from `<config>/aircord/templates/`. A file whose `name` matches a preset
 replaces it, so you can adapt a shipped template without patching the source.
+The Rust build's presets live in `rust/crates/core/presets/`; the Go build's in
+`internal/device/presets/`.
 
 ## Structure
 
@@ -24,11 +31,19 @@ type  = "button"
 | Field | Meaning |
 | ----- | ------- |
 | `name` | Shown in the panel header and the template dropdown. Required. |
-| `match` | Regexp tested against the advertised device name. A template without `match` never auto-selects but can still be chosen manually. |
-| `[[action]]` | One control. At least one is required. |
+| `match` | Regexp tested against the advertised device name. A template without `match` never auto-selects by name but can still be chosen manually. |
+| `model` | Regexp tested against the value of the `AT+MODEL` line of `AT+CFG`, e.g. `S31-NB,v1.4.0`. Anchor it (`'^S31-NB(,\|$)'`); it may pin a firmware version. Optional. |
+| `[[action]]` | One control. |
+| `[[setting]]` | One typed setting, see [Settings](#settings). |
+
+A template needs at least one action or setting. Files with only `[[action]]`
+tables, as written before settings existed, stay valid.
 
 On connect, Aircord picks the first template whose `match` fits the device name.
-You can always override the choice from the dropdown in the panel header.
+Once `AT+CFG` has been read, the first template (in name order) whose `model`
+fits the `AT+MODEL` value takes precedence: the advertised name of a Dragino NB
+node is usually its IMEI and says nothing about the model. You can always
+override the choice from the dropdown in the panel header.
 
 ## Action types
 
@@ -106,18 +121,112 @@ A control panel is a column of similar-looking buttons. Without `confirm`, the
 difference between "show configuration" and "wipe configuration" is two
 millimetres of mouse travel.
 
+## Settings
+
+```toml
+name  = "Dragino S31-NB"
+model = '^S31-NB(,|$)'
+
+[[setting]]
+key          = "TDC"
+label        = "Sendeintervall"
+group        = "Messen & Senden"
+help         = "Wie oft der Sensor Daten schickt."
+type         = "duration"
+unit         = "s"
+presets      = [900, 1800, 3600, 7200]
+
+[[setting]]
+key          = "UNAME"
+label        = "MQTT-Benutzer"
+group        = "MQTT-Zugang"
+type         = "text"
+risk         = "network"
+needs_reboot = true
+visible_if   = "PRO=3,*"
+```
+
+A setting is one `AT+<KEY>=<value>` line of the device's `AT+CFG` output. Aircord
+reads the value from there and sends `AT+<KEY>=<value>` to change it.
+
+| Field | Meaning |
+| ----- | ------- |
+| `key` | The name as `AT+CFG` prints it, in capitals: `TDC`, `5VT`, `POWER_SAVE`. Unique per template. Required. |
+| `label` | What the person sees, in plain words. Required. |
+| `group` | The task it belongs to (`"Netz"`, `"Messen & Senden"`); the form groups by it. Required. |
+| `help` | One sentence under the field. Also appended to the error when a value has the wrong format, so put the expected format here. |
+| `type` | `duration`, `number`, `choice`, `toggle`, `text` or `secret`. Required. |
+| `risk` | `none` (default), `network` (a wrong value takes the device off the network or away from its server), `reboot` (the change restarts the device), `irreversible` (cannot be undone in the field). Aircord asks before transferring a `network` or `irreversible` change. |
+| `needs_reboot` | `true` when the value takes effect only after `ATZ`. Aircord then offers the template's restart action after the transfer; it never sends it on its own. |
+| `visible_if` | `"KEY=pattern"`: shown only while `KEY` has a matching value, the form's value over the device's. `*` matches anything, the rest is literal, and the whole value must match: `"PRO=3,*"`. |
+| `expert` | `true`: shown only in expert mode. |
+
+Unknown fields are refused, so a typo such as `needs_rebot` does not silently
+drop a flag. Fields that do not apply to the type (a `unit` on a `text`) are
+refused too.
+
+### Types
+
+| `type` | Extra fields | Notes |
+| ------ | ------------ | ----- |
+| `duration` | `unit` (`ms`, `s`, `min`, `h`; required), `presets`, `min`, `max` | A whole number in the device's unit, never negative. Shown in words: `900` s is "15 Minuten". |
+| `number` | `unit` (any display text, e.g. `°C`), `presets`, `min`, `max` | A whole number. |
+| `choice` | `options = [{ text, value }]` (required), `custom`, `pattern`, `max_len` | One of the options. With `custom = true` any other value is allowed too, checked by `pattern` and `max_len` (only allowed with `custom`). Option values are unique. |
+| `toggle` | `on`, `off` (both required, different) | The values the two positions send. Inverted device logic is just values: `on = "0,8,16"`, `off = "1,0,0"`. |
+| `text` | `pattern`, `max_len` | Not empty. |
+| `secret` | `pattern`, `max_len` | Like `text`, never shown or logged in clear. |
+
+A `pattern` must match the whole input; Aircord anchors it, so `'[a-z]{6}'`
+means exactly six lower-case letters. Write regexps as TOML literal strings
+(`'…'`) to avoid doubling every backslash.
+
+Input errors are shown in plain German for the person in the field, e.g. "Bitte
+mindestens 180 Sekunden eingeben." A line break in any value is refused.
+
+### Reading, transferring, verifying
+
+1. Aircord sends `AT+CFG` and reads every `AT+<KEY>=<value>` line up to `OK`.
+   Blank lines, echoes, banners and the `Signal Strength:` lines a node prints
+   every few seconds are skipped; `NULL` reads as empty.
+2. The form offers the settings whose `key` the device reported. A setting the
+   device does not report is not available and is never sent blind.
+3. On transfer, only values that differ from the device's are checked and sent,
+   in template order. Numbers compare by value (`0900` is `900`). Settings
+   hidden by `visible_if` are left out.
+4. Each command must be answered with `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and the
+   other `AT_…ERROR` lines mark that field as failed; the others are still sent.
+5. Aircord reads `AT+CFG` again and reports each field as verified, different
+   (the device answered `OK` but kept another value) or failed, or as unverified
+   when the read-back did not show it.
+6. When a taken change has `needs_reboot`, Aircord offers the restart action of
+   the template (a `button` with `cmd = "ATZ"`).
+
+A worked example of real `AT+CFG` output is in
+[devices/s31-nb-cfg-sample.md](devices/s31-nb-cfg-sample.md).
+
+### Passwords
+
+`AT+PWORD` (device password), `AT+PWD` (MQTT password) and `AT+OTAPWD` are
+always masked as `******`, whatever the template says: in commands Aircord
+sends, in results it reports, and in every line it shows. Settings of
+`type = "secret"` are masked the same way. Some firmware prints `AT+PWORD` in
+clear in `AT+CFG`, so this matters for any transcript you save or share.
+
 ## Validation
 
 Templates are validated on load. A file with a problem is skipped and the reason
 is reported in the terminal at startup — one bad template never prevents the
 others from loading. The rules:
 
-- `name` is required, and at least one action must exist
+- `name` is required, and at least one action or setting must exist
 - every action needs a `label`
 - `button` and `read` need a `cmd`; `input` needs a `cmd` containing a `<…>`
   placeholder; `select` needs `options`, each with `text` and `cmd`
 - `read` needs a `parse` regexp, and it must compile
-- `match`, when present, must compile
+- `match` and `model`, when present, must compile
+- every setting needs `key`, `label`, `group` and a known `type` with its
+  required fields; `pattern`, `min`/`max`, `presets` and `visible_if` must make
+  sense (see [Settings](#settings))
 
 ## Adding a template for new hardware
 

@@ -1,6 +1,7 @@
-//! Device templates: a device type as a list of friendly actions that map to AT commands, so nobody needs the raw
-//! syntax. The presets ship inside the binary; TOML files in `<config>/aircord/templates/` override or add to them. A
-//! template says what actions exist and what each sends, not how they look: the window turns it into a control panel.
+//! Device templates: a device type as a list of friendly actions that map to AT commands, and as typed settings read
+//! from `AT+CFG` ([`crate::settings`]), so nobody needs the raw syntax. The presets ship inside the binary; TOML files
+//! in `<config>/aircord/templates/` override or add to them. A template says what exists and what each sends, not how
+//! it looks: the window turns it into a control panel and a settings form.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,9 +11,19 @@ use regex::{NoExpand, Regex};
 use serde::Deserialize;
 
 use crate::config;
+use crate::redact;
+use crate::settings::{RawSetting, Setting};
 
-/// The presets, read from the Go tree so both builds ship the same ones.
-const PRESETS: &[(&str, &str)] = &[("dragino-nb.toml", include_str!("../../../../internal/device/presets/dragino-nb.toml"))];
+/// The presets. `dragino-nb.toml` is the generic panel picked by the advertised name; the others are picked by the
+/// model `AT+CFG` reports and carry the typed settings.
+const PRESETS: &[(&str, &str)] = &[
+    ("dragino-nb.toml", include_str!("../presets/dragino-nb.toml")),
+    ("dragino-s31-nb.toml", include_str!("../presets/dragino-s31-nb.toml")),
+    ("dragino-d20-nb.toml", include_str!("../presets/dragino-d20-nb.toml")),
+    ("dragino-d22-nb.toml", include_str!("../presets/dragino-d22-nb.toml")),
+    ("dragino-d23-nb.toml", include_str!("../presets/dragino-d23-nb.toml")),
+    ("dragino-wqs-nb.toml", include_str!("../presets/dragino-wqs-nb.toml")),
+];
 
 /// How a control looks and behaves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +70,11 @@ struct RawTemplate {
     #[serde(default, rename = "match")]
     matches: String,
     #[serde(default)]
+    model: String,
+    #[serde(default)]
     action: Vec<RawAction>,
+    #[serde(default)]
+    setting: Vec<RawSetting>,
 }
 
 /// One control of a device's panel.
@@ -98,19 +113,53 @@ impl Action {
     }
 }
 
-/// A device type and its panel's actions.
+/// A device type: its panel's actions and its settings.
 #[derive(Clone, Debug)]
 pub struct Template {
     pub name: String,
     /// Tested against the advertised name; none: chosen by hand only.
     matches: Option<Regex>,
+    /// Tested against the value of the `AT+MODEL` line of `AT+CFG` (`S31-NB,v1.4.0`).
+    model: Option<Regex>,
     pub actions: Vec<Action>,
+    /// In template order, which is the order changes are sent in.
+    pub settings: Vec<Setting>,
 }
 
 impl Template {
     /// Whether the template fits a device of this advertised name.
     pub fn matches(&self, name: &str) -> bool {
         self.matches.as_ref().is_some_and(|re| re.is_match(name))
+    }
+
+    /// Whether the template fits a device whose `AT+MODEL` value is `model_line` (`S31-NB,v1.4.0`).
+    pub fn fits_model(&self, model_line: &str) -> bool {
+        self.model.as_ref().is_some_and(|re| re.is_match(model_line.trim()))
+    }
+
+    pub fn setting(&self, key: &str) -> Option<&Setting> {
+        self.settings.iter().find(|s| s.key == key)
+    }
+
+    /// The settings a form offers for a device: those its `AT+CFG` reported, the expert ones only in expert mode.
+    /// Whether each is shown also depends on its `visible_if` and the form's values: see [`Setting::visible`].
+    pub fn settings_for<'a>(&'a self, current: &'a crate::cfg::Cfg, expert: bool) -> impl Iterator<Item = &'a Setting> + 'a {
+        self.settings.iter().filter(move |s| (expert || !s.expert) && current.get(&s.key).is_some())
+    }
+
+    /// The keys of its `type = "secret"` settings, which [`redact::redact_line`] masks on top of the fixed ones.
+    pub fn secret_keys(&self) -> Vec<&str> {
+        self.settings.iter().filter(|s| s.is_secret()).map(|s| s.key.as_str()).collect()
+    }
+
+    /// `line` with every password in it masked: the fixed ones and this template's secrets.
+    pub fn redact<'a>(&self, line: &'a str) -> std::borrow::Cow<'a, str> {
+        redact::redact_line(line, &self.secret_keys())
+    }
+
+    /// The restart action (`ATZ`) the window offers after a transfer that needs one; never sent on its own.
+    pub fn reboot_action(&self) -> Option<&Action> {
+        self.actions.iter().find(|a| a.kind == Kind::Button && a.cmd.trim().eq_ignore_ascii_case("ATZ"))
     }
 }
 
@@ -125,8 +174,20 @@ pub fn parse(text: &str) -> Result<Template, String> {
         "" => None,
         m => Some(Regex::new(m).map_err(|e| format!("template {name:?}: invalid match regexp: {e}"))?),
     };
-    if raw.action.is_empty() {
-        return Err(format!("template {name:?}: no actions"));
+    let model = match raw.model.as_str() {
+        "" => None,
+        m => Some(Regex::new(m).map_err(|e| format!("template {name:?}: invalid model regexp: {e}"))?),
+    };
+    if raw.action.is_empty() && raw.setting.is_empty() {
+        return Err(format!("template {name:?}: no actions or settings"));
+    }
+    let mut settings: Vec<Setting> = Vec::with_capacity(raw.setting.len());
+    for s in raw.setting {
+        let s = s.check().map_err(|e| format!("template {name:?} {e}"))?;
+        if settings.iter().any(|o| o.key == s.key) {
+            return Err(format!("template {name:?}: setting {} appears twice", s.key));
+        }
+        settings.push(s);
     }
     let mut actions = Vec::with_capacity(raw.action.len());
     for a in raw.action {
@@ -162,7 +223,7 @@ pub fn parse(text: &str) -> Result<Template, String> {
         };
         actions.push(Action { label, cmd: a.cmd, kind, options: a.options, parse, confirm: a.confirm });
     }
-    Ok(Template { name, matches, actions })
+    Ok(Template { name, matches, model, actions, settings })
 }
 
 /// The presets with the user's templates over them, by name.
@@ -211,6 +272,17 @@ impl Templates {
     /// The first template, in name order, that fits the device name.
     pub fn suggest(&self, device_name: &str) -> Option<&Template> {
         self.by_name.values().find(|t| t.matches(device_name))
+    }
+
+    /// The first template, in name order, whose `model` fits the `AT+MODEL` value (`S31-NB,v1.4.0`).
+    pub fn for_model(&self, model_line: &str) -> Option<&Template> {
+        self.by_name.values().find(|t| t.fits_model(model_line))
+    }
+
+    /// The template for a device: by the model `AT+CFG` reported when there is one, else by the advertised name. The
+    /// model wins because the name of an NB node is usually its IMEI.
+    pub fn select(&self, model_line: Option<&str>, device_name: &str) -> Option<&Template> {
+        model_line.and_then(|m| self.for_model(m)).or_else(|| self.suggest(device_name))
     }
 
     pub fn get(&self, name: &str) -> Option<&Template> {
@@ -308,6 +380,105 @@ type  = "select"
         assert_eq!(confirmed, ["NB-IoT band (Germany)", "Reboot device"]);
         assert_eq!(t.suggest("D23-NB").map(|t| t.name.as_str()), Some("Dragino NB-IoT"));
         assert!(t.suggest("Pixel 9").is_none());
+    }
+
+    const S31_CFG: &str = include_str!("../testdata/s31-nb-v1.4.0-cfg.txt");
+    const INVENTORY: &str = include_str!("../../../../docs/devices/dragino-nb-at-commands.md");
+
+    fn presets() -> Templates {
+        Templates::load_from(Path::new("/nonexistent"))
+    }
+
+    #[test]
+    fn every_preset_parses() {
+        let t = presets();
+        assert!(t.errors().is_empty(), "{:?}", t.errors());
+        assert_eq!(t.names(), ["Dragino D20-NB", "Dragino D22-NB", "Dragino D23-NB", "Dragino NB-IoT", "Dragino S31-NB", "Dragino WQS-NB"]);
+        for name in t.names().iter().filter(|n| *n != "Dragino NB-IoT") {
+            let tpl = t.get(name).unwrap();
+            assert!(!tpl.settings.is_empty(), "{name}");
+            assert!(tpl.matches.is_none(), "{name}: model presets must not take over the advertised-name suggestion");
+            assert_eq!(tpl.reboot_action().map(|a| a.confirm), Some(true), "{name}: restart offered, with a question");
+            assert!(tpl.settings.iter().filter(|s| s.key == "PWORD" || s.key == "PWD").all(Setting::is_secret), "{name}");
+            assert!(tpl.settings.iter().filter(|s| s.key == "PWORD").all(|s| s.expert), "{name}: PWORD is expert only");
+        }
+    }
+
+    #[test]
+    fn the_model_picks_the_template() {
+        let t = presets();
+        for (line, want) in [
+            ("S31-NB,v1.4.0", Some("Dragino S31-NB")),
+            ("D20-NB,v1.3.4", Some("Dragino D20-NB")),
+            ("D20S-NB,v1.2.1", Some("Dragino D20-NB")),
+            ("D22-NB,v1.3.4", Some("Dragino D22-NB")),
+            ("D23-NB,v1.3.4", Some("Dragino D23-NB")),
+            ("WQS-NB,v1.1.0", Some("Dragino WQS-NB")),
+            ("WQS-NS,v1.0.2", Some("Dragino WQS-NB")),
+            ("WQS-NB", Some("Dragino WQS-NB")),
+            ("S31-NBX,v1.0", None),
+            ("LDS12-NB,v1.0", None),
+        ] {
+            assert_eq!(t.for_model(line).map(|t| t.name.as_str()), want, "{line}");
+        }
+        let cfg = crate::cfg::Cfg::parse_text(S31_CFG);
+        assert_eq!(t.select(cfg.model_line(), "866207050000001").map(|t| t.name.as_str()), Some("Dragino S31-NB"), "BLE name is the IMEI");
+        assert_eq!(t.select(None, "D20-NB").map(|t| t.name.as_str()), Some("Dragino NB-IoT"), "no AT+CFG yet: by name");
+        assert_eq!(t.select(Some("X1-NB,v1"), "D23-NB").map(|t| t.name.as_str()), Some("Dragino NB-IoT"), "unknown model: by name");
+        assert!(t.select(None, "866207050000001").is_none());
+    }
+
+    #[test]
+    fn the_s31_preset_holds_only_what_the_device_reports_and_accepts_its_values() {
+        let tpl = presets().get("Dragino S31-NB").cloned().unwrap();
+        let cfg = crate::cfg::Cfg::parse_text(S31_CFG);
+        for s in &tpl.settings {
+            let value = cfg.get(&s.key).unwrap_or_else(|| panic!("{} is not in the S31 AT+CFG", s.key));
+            if !value.is_empty() {
+                assert!(s.check(value).is_ok(), "{}: the device's own value {value:?} is refused: {:?}", s.key, s.check(value));
+            }
+        }
+        for key in ["SHTEMP", "SHHUM", "APN", "PRO", "SERVADDR", "TDC"] {
+            assert!(tpl.setting(key).is_some_and(|s| !s.expert), "{key} is a lay setting");
+        }
+        assert_eq!(tpl.settings_for(&cfg, false).count(), tpl.settings.iter().filter(|s| !s.expert).count());
+        assert_eq!(tpl.settings_for(&cfg, true).count(), tpl.settings.len());
+        assert_eq!(tpl.redact("<< AT+PWORD=kxqmzp"), "<< AT+PWORD=******");
+    }
+
+    #[test]
+    fn the_d2x_and_wqs_presets_use_only_documented_commands() {
+        let t = presets();
+        for name in ["Dragino D20-NB", "Dragino D22-NB", "Dragino D23-NB", "Dragino WQS-NB"] {
+            let tpl = t.get(name).unwrap();
+            let cmds = tpl.actions.iter().flat_map(|a| std::iter::once(a.cmd.clone()).chain(a.options.iter().map(|o| o.cmd.clone())));
+            for cmd in cmds.filter(|c| !c.is_empty()) {
+                let verb = cmd.split('=').next().unwrap_or_default();
+                assert!(INVENTORY.contains(&format!("`{verb}")), "{name}: {verb} is not in the inventory");
+            }
+            for s in &tpl.settings {
+                assert!(INVENTORY.contains(&format!("`AT+{}=", s.key)), "{name}: AT+{} is not in the inventory", s.key);
+            }
+            assert!(tpl.setting("QBAND").is_none(), "{name}: QBAND waits for a device test");
+        }
+        let alarms = |name: &str| t.get(name).unwrap().settings.iter().filter(|s| s.key.starts_with("TEMPALARM")).count();
+        assert_eq!([alarms("Dragino D20-NB"), alarms("Dragino D22-NB"), alarms("Dragino D23-NB")], [1, 2, 3], "one alarm per probe");
+        let tr = t.get("Dragino D20-NB").unwrap().setting("TR").unwrap();
+        assert_eq!(tr.check("120").unwrap_err(), "Bitte mindestens 180 Sekunden eingeben.");
+    }
+
+    #[test]
+    fn settings_in_a_template_and_their_errors() {
+        let t = parse("name = \"x\"\nmodel = '^X1-NB(,|$)'\n[[setting]]\nkey = \"TDC\"\nlabel = \"t\"\ngroup = \"g\"\ntype = \"duration\"\nunit = \"s\"")
+            .unwrap();
+        assert!(t.actions.is_empty() && t.settings.len() == 1, "settings alone make a template");
+        assert!(t.fits_model("X1-NB,v1.0") && !t.fits_model("X1-NBB"));
+        let twice = "name = \"x\"\n[[setting]]\nkey = \"TDC\"\nlabel = \"t\"\ngroup = \"g\"\ntype = \"text\"\n\
+                     [[setting]]\nkey = \"TDC\"\nlabel = \"u\"\ngroup = \"g\"\ntype = \"text\"";
+        assert!(parse(twice).unwrap_err().contains("appears twice"));
+        assert!(parse("name = \"x\"\nmodel = '('\n[[action]]\nlabel = \"x\"\ncmd = \"AT\"\ntype = \"button\"").is_err());
+        let bad = parse("name = \"x\"\n[[setting]]\nkey = \"TDC\"\nlabel = \"t\"\ngroup = \"g\"\ntype = \"slider\"").unwrap_err();
+        assert!(bad.starts_with("template \"x\" setting TDC: unknown type"), "{bad}");
     }
 
     #[test]

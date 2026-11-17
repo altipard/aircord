@@ -1,0 +1,13 @@
+[6902]NB module is initializing...
+[6940]Password Correct
+[8266]NBIOT has responded.
+[12597]Echo mode turned off successfully.
+[13943]Disable the reporting of deep sleep event URC.
+[15302]Model information:BC660K-GL.
+[16642]The IMEI number is:866207050000001.
+[17989]The IMSI number is:901405100000001.
+[19536]Set the data format for sending and receiving.
+Currently set frequency band: 8,20
+[22233]Set APN successfully
+[24264]Exit sleep mode
+[28891]Signal Strength:99

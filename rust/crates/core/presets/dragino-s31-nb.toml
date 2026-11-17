@@ -1,0 +1,316 @@
+# Dragino S31-NB
+#
+# Am Gerät belegt: S31-NB, Firmware v1.4.0, 1NCE (docs/devices/s31-nb-cfg-sample.md).
+# Jede Einstellung hier steht in dessen AT+CFG-Ausgabe. AT+QBAND fehlt, weil
+# das Band nicht in AT+CFG steht und das Setzen ungeprüft ist.
+#
+# Ausgewählt über die AT+MODEL-Zeile von AT+CFG, nicht über den BLE-Namen
+# (der ist meist die IMEI). Einstellungen, die das Gerät in AT+CFG nicht meldet,
+# zeigt Aircord als nicht verfügbar und sendet sie nicht.
+# Schema: docs/device-templates.md. Befehle: docs/devices/dragino-nb-at-commands.md.
+
+name  = "Dragino S31-NB"
+model = '^S31-NB(,|$)'
+
+[[action]]
+label = "Verbindung prüfen"
+cmd   = "AT"
+type  = "button"
+
+[[action]]
+label = "Einstellungen lesen"
+cmd   = "AT+CFG"
+type  = "button"
+
+# Übernimmt Einstellungen mit needs_reboot. Die BLE-Verbindung bricht ab.
+[[action]]
+label   = "Neu starten"
+cmd     = "ATZ"
+type    = "button"
+confirm = true
+
+# --- Netz ---------------------------------------------------------------------
+# needs_reboot bei Netz-, Server- und MQTT-Feldern: Dragino hängt in den
+# Beispielen (Inventar Q2) an solche Änderungen ein ATZ an, und das Gerät setzt
+# den APN beim Start ("Set APN successfully" im Startbanner). Eine vollständige
+# Liste gibt es nicht (Inventar, offener Punkt 5); der Neustart wird nur angeboten.
+
+[[setting]]
+key          = "APN"
+label        = "Zugangspunkt (APN) des Mobilfunkanbieters"
+group        = "Netz"
+help         = "Steht in den Unterlagen der SIM-Karte, z. B. iot.1nce.net."
+type         = "choice"
+options      = [{ text = "1NCE", value = "iot.1nce.net" }]
+custom       = true
+pattern      = '[A-Za-z0-9][A-Za-z0-9._-]*'
+max_len      = 100
+risk         = "network"
+needs_reboot = true
+
+# --- Server und Protokoll -----------------------------------------------------
+# TCP mit JSON fehlt: Q2 nennt 4,1, Q1 4,5 (Widerspruch im Inventar).
+
+[[setting]]
+key          = "PRO"
+label        = "Übertragungsart und Datenformat"
+group        = "Server"
+help         = "Zwei Zahlen: Protokoll (1 CoAP, 2 UDP, 3 MQTT, 4 TCP), Format (0 HEX, 1 ThingSpeak, 3 ThingsBoard, 5 JSON)."
+type         = "choice"
+options      = [
+  { text = "UDP, JSON",  value = "2,5" },
+  { text = "UDP, HEX",   value = "2,0" },
+  { text = "MQTT, JSON", value = "3,5" },
+  { text = "MQTT, HEX",  value = "3,0" },
+  { text = "TCP, HEX",   value = "4,0" },
+]
+custom       = true
+pattern      = '[1-4],[0135]'
+risk         = "network"
+needs_reboot = true
+
+[[setting]]
+key          = "SERVADDR"
+label        = "Server-Adresse und Port"
+group        = "Server"
+help         = "Adresse und Port mit Komma, z. B. udp.os.1nce.com,4445."
+type         = "text"
+pattern      = '[A-Za-z0-9.-]+,([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])'
+risk         = "network"
+needs_reboot = true
+
+# --- MQTT-Zugang (nur bei Übertragungsart MQTT) --------------------------------
+
+[[setting]]
+key          = "CLIENT"
+label        = "MQTT-Client-ID"
+group        = "MQTT-Zugang"
+type         = "text"
+risk         = "network"
+needs_reboot = true
+visible_if   = "PRO=3,*"
+
+[[setting]]
+key          = "UNAME"
+label        = "MQTT-Benutzer"
+group        = "MQTT-Zugang"
+type         = "text"
+risk         = "network"
+needs_reboot = true
+visible_if   = "PRO=3,*"
+
+[[setting]]
+key          = "PWD"
+label        = "MQTT-Passwort"
+group        = "MQTT-Zugang"
+help         = "Nicht das Gerätepasswort."
+type         = "secret"
+risk         = "network"
+needs_reboot = true
+visible_if   = "PRO=3,*"
+
+[[setting]]
+key          = "PUBTOPIC"
+label        = "MQTT-Sende-Topic"
+group        = "MQTT-Zugang"
+type         = "text"
+needs_reboot = true
+visible_if   = "PRO=3,*"
+
+[[setting]]
+key          = "SUBTOPIC"
+label        = "MQTT-Empfangs-Topic"
+group        = "MQTT-Zugang"
+type         = "text"
+needs_reboot = true
+visible_if   = "PRO=3,*"
+
+# --- Messen und Senden --------------------------------------------------------
+# Ein Minimum für TDC dokumentiert Dragino nicht (Inventar, offener Punkt 6).
+
+[[setting]]
+key     = "TDC"
+label   = "Sendeintervall"
+group   = "Messen & Senden"
+help    = "Wie oft der Sensor Daten schickt. Kürzer heißt mehr Daten und kürzere Batterielaufzeit."
+type    = "duration"
+unit    = "s"
+presets = [300, 900, 1800, 3600, 7200, 14400, 43200, 86400]
+
+# --- Alarme -------------------------------------------------------------------
+# Laut S31-NB-Handbuch (Q7, Abschnitt 2.5): Prüfung bei jeder Messung, Alarm
+# sendet sofort. 0 = Grenze ungenutzt, gleiche Werte schalten aus (0,0).
+
+[[setting]]
+key     = "SHTEMP"
+label   = "Temperaturalarm"
+group   = "Alarme"
+help    = "Unten,oben in °C, z. B. 20,30. 0 = diese Grenze nicht nutzen."
+type    = "choice"
+options = [{ text = "Aus", value = "0,0" }]
+custom  = true
+pattern = '-?[0-9]{1,3},-?[0-9]{1,3}'
+
+[[setting]]
+key     = "SHHUM"
+label   = "Feuchtealarm"
+group   = "Alarme"
+help    = "Unten,oben in %, z. B. 50,80. 0 = diese Grenze nicht nutzen."
+type    = "choice"
+options = [{ text = "Aus", value = "0,0" }]
+custom  = true
+pattern = '[0-9]{1,3},[0-9]{1,3}'
+
+# --- Nur im Expertenmodus ------------------------------------------------------
+
+[[setting]]
+key     = "CSQTIME"
+label   = "Dauer der Netzsuche"
+group   = "Netz"
+help    = "Länger suchen hilft bei schwachem Netz und kostet Batterie."
+type    = "duration"
+unit    = "min"
+presets = [5, 10, 15]
+expert  = true
+
+[[setting]]
+key          = "QCOPS"
+label        = "Netzbetreiber fest einstellen"
+group        = "Netz"
+help         = "Fünf oder sechs Ziffern (MCC und MNC), z. B. 26201."
+type         = "text"
+pattern      = '[0-9]{5,6}'
+risk         = "network"
+needs_reboot = true
+expert       = true
+
+[[setting]]
+key          = "DNSCFG"
+label        = "DNS-Server"
+group        = "Netz"
+help         = "So wie das Gerät es anzeigt, z. B. \"8.8.8.8\",\"8.8.4.4\"."
+type         = "text"
+risk         = "network"
+needs_reboot = true
+expert       = true
+
+[[setting]]
+key          = "BKDNS"
+label        = "Dynamische DNS-Auflösung"
+group        = "Netz"
+help         = "Modus,Intervall in Stunden,Ersatz-IP, z. B. 1,0,NULL."
+type         = "text"
+pattern      = '[0-2],[0-9]+,[^,\s]+'
+risk         = "network"
+needs_reboot = true
+expert       = true
+
+[[setting]]
+key          = "NTP"
+label        = "Zeitserver"
+group        = "Netz"
+type         = "text"
+needs_reboot = true
+expert       = true
+
+[[setting]]
+key          = "TLSMOD"
+label        = "Verschlüsselung (TLS)"
+group        = "Server"
+help         = "Zwei Zahlen wie vom Gerät gezeigt, z. B. 0,0. Modus 1 und 2 brauchen vorher geschriebene Zertifikate."
+type         = "text"
+pattern      = '[01],[0-2]'
+risk         = "network"
+needs_reboot = true
+expert       = true
+
+[[setting]]
+key          = "MQOS"
+label        = "MQTT-Zustellgarantie"
+group        = "MQTT-Zugang"
+type         = "choice"
+options      = [
+  { text = "Höchstens einmal (0)", value = "0" },
+  { text = "Mindestens einmal (1)", value = "1" },
+  { text = "Genau einmal (2)", value = "2" },
+]
+needs_reboot = true
+visible_if   = "PRO=3,*"
+expert       = true
+
+[[setting]]
+key    = "REDPT"
+label  = "Verlorene Daten nachsenden"
+group  = "Messen & Senden"
+type   = "toggle"
+on     = "1"
+off    = "0"
+expert = true
+
+[[setting]]
+key    = "RXDL"
+label  = "Empfangsfenster nach dem Senden verlängern"
+group  = "Diagnose"
+type   = "duration"
+unit   = "ms"
+expert = true
+
+[[setting]]
+key    = "DOWNTE"
+label  = "Downlink-Debugmodus"
+group  = "Diagnose"
+type   = "toggle"
+on     = "0,1"
+off    = "0,0"
+expert = true
+
+[[setting]]
+key     = "INTMOD"
+label   = "Sendung bei externem Signal"
+group   = "Messen & Senden"
+type    = "choice"
+options = [
+  { text = "Aus", value = "0" },
+  { text = "Steigende und fallende Flanke", value = "1" },
+  { text = "Fallende Flanke", value = "2" },
+  { text = "Steigende Flanke", value = "3" },
+]
+expert  = true
+
+[[setting]]
+key    = "5VT"
+label  = "Vorlaufzeit der Sensorversorgung"
+group  = "Messen & Senden"
+type   = "duration"
+unit   = "ms"
+expert = true
+
+[[setting]]
+key    = "EXT"
+label  = "Zählerstand"
+group  = "Messen & Senden"
+type   = "number"
+min    = 0
+expert = true
+
+# Wirkt laut Q7 erst nach einem Neustart, wenn die Serverzeit vorher nicht
+# synchronisiert war.
+[[setting]]
+key          = "CLOCKLOG"
+label        = "Messung zur vollen Zeit"
+group        = "Messen & Senden"
+help         = "An,Startsekunde,Intervall in Minuten,Einträge je Sendung, z. B. 1,65535,15,8. Aus: 1,65535,0,0."
+type         = "text"
+pattern      = '[01],([0-9]{1,4}|65535),[0-9]{1,3},[0-9]{1,2}'
+needs_reboot = true
+expert       = true
+
+[[setting]]
+key          = "PWORD"
+label        = "Gerätepasswort ändern"
+group        = "Sicherheit"
+help         = "Genau 6 Kleinbuchstaben. Ein vergessenes Passwort lässt sich im Feld nicht zurückholen."
+type         = "secret"
+pattern      = '[a-z]{6}'
+risk         = "irreversible"
+expert       = true
