@@ -62,7 +62,7 @@ pub(crate) struct Guided {
     pub(crate) firmware: Option<String>,
     /// This view's own alert line, in German.
     pub(crate) notice: Alert,
-    /// A password was sent by hand and the settings still did not come.
+    /// A password was sent, by the connect or by hand, and the settings still did not come.
     pub(crate) password_tried: bool,
 }
 

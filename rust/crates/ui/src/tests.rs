@@ -719,6 +719,17 @@ fn a_restart_without_a_link_says_so_and_sends_nothing() {
 }
 
 #[test]
+fn a_password_sent_by_the_connect_and_not_taken_is_said_to_be_wrong() {
+    let link = FakeLink::console("aa", "Sensor 7");
+    link.reply("AT+CFG", &[]);
+    let mut w = lay(link, &[]);
+    w.h.state_mut().pin = "349011".into();
+    lay_connected(&mut w, "Sensor 7");
+    assert_eq!(w.link.sent(), ["******", "AT+CFG"]);
+    assert!(has(&w, "Passwort: Eingabe") && has_part(&w, "nicht angenommen") && !has_part(&w, "Etikett"));
+}
+
+#[test]
 fn an_answer_that_is_no_settings_does_not_ask_for_the_password() {
     for reply in [&["AT_ERROR"][..], &["AT+TDC=900", "OK"], &["OK"]] {
         let link = FakeLink::console("aa", "Sensor 7");

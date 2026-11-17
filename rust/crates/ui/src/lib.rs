@@ -685,6 +685,8 @@ impl App {
         self.set_status(format!("connected: {name}"));
         self.apply_template_for(&name);
         self.guided_reset(guided::Read::Reading);
+        // The connect sends the PIN that is typed in: if the settings stay away after it, it was not taken.
+        self.guided.password_tried = !self.pin.trim().is_empty();
         self.conn = Conn::Connected { name, addr, profile };
         self.focus_cmd = true;
     }
