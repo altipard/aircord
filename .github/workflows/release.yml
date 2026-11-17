@@ -15,7 +15,9 @@ defaults:
     shell: bash
 
 env:
-  FYNE_TOOLS_VERSION: v1.7.4
+  RUST_VERSION: "1.95"
+  CARGO_BUNDLE_VERSION: "0.12.0"
+  CARGO_TERM_COLOR: always
 
 jobs:
   package:
@@ -39,50 +41,41 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: dtolnay/rust-toolchain@master
         with:
-          go-version: "1.25"
-          cache: true
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
 
-      # Fyne needs OpenGL / X11 headers to compile on Linux.
-      - name: Install Linux GUI build deps
+      # btleplug links libdbus (BlueZ); eframe's window stack wants the X11,
+      # Wayland, xkbcommon and GL development files.
+      - name: Install Linux build deps
         if: matrix.os == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdbus-1-dev libxkbcommon-dev \
+            libgl1-mesa-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
 
-      - name: Install fyne CLI
-        run: go install "fyne.io/tools/cmd/fyne@${FYNE_TOOLS_VERSION}"
+      - name: Install cargo-bundle
+        if: matrix.os == 'macos'
+        run: cargo install cargo-bundle --locked --version "${CARGO_BUNDLE_VERSION}"
 
-      # Native package (host OS == target OS on each runner). Version comes from
-      # the tag, not FyneApp.toml. Unsigned; macOS users right-click → Open on
-      # first launch.
+      # Native package (host OS == target OS on each runner). The version comes
+      # from the tag, not Cargo.toml. No Developer ID signature; macOS users
+      # right-click → Open on first launch.
       - name: Package
+        id: package
+        env:
+          AIRCORD_TAG: ${{ github.ref_name }}
+          AIRCORD_BUILD: ${{ github.run_number }}
+          ASSET: aircord-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.ext }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          fyne package --release \
-            --app-version "${version%%-*}" \
-            --app-build "${{ github.run_number }}"
-
-      - name: Collect artifact
-        id: collect
-        run: |
-          set -euo pipefail
-          asset="aircord-${GITHUB_REF_NAME}-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.ext }}"
-          mkdir -p dist
-          case "${{ matrix.os }}" in
-            linux)   mv ./*.tar.xz "dist/${asset}" ;;
-            windows) mv ./*.exe "dist/${asset}" ;;
-            macos)
-              apps=(./*.app)
-              ditto -c -k --keepParent "${apps[0]}" "dist/${asset}"
-              ;;
-          esac
-          ls -la dist
-          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+          bash packaging/package.sh
+          echo "asset=${ASSET}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.collect.outputs.asset }}
-          path: dist/${{ steps.collect.outputs.asset }}
+          name: ${{ steps.package.outputs.asset }}
+          path: dist/${{ steps.package.outputs.asset }}
           if-no-files-found: error
 
   # One job creates the release so the matrix jobs don't race on it.

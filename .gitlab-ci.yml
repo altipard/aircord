@@ -62,3 +62,109 @@ test:
   stage: check
   script:
     - cargo test --workspace --locked
+
+# ---------------------------------------------------------------- packaging --
+
+.package-rules:
+  rules:
+    - if: $CI_COMMIT_TAG
+
+package:linux:
+  extends:
+    - .rust-linux
+    - .package-rules
+  stage: package
+  variables:
+    ASSET: "aircord-linux-amd64.tar.xz"
+    AIRCORD_TAG: $CI_COMMIT_TAG
+  script:
+    - bash packaging/package.sh
+    - |
+      curl --fail --silent --show-error \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --upload-file "dist/${ASSET}" \
+        "${PKG_URL}/${ASSET}"
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+# Needs GitLab SaaS macOS runners enabled for the project. This is the only
+# platform whose runtime is actually tested, so run it for every release.
+package:macos:
+  extends: .package-rules
+  stage: package
+  tags: [saas-macos-medium-m1]
+  image: macos-14-xcode-15
+  when: manual
+  allow_failure: true
+  variables:
+    ASSET: "aircord-macos-arm64.app.zip"
+    AIRCORD_TAG: $CI_COMMIT_TAG
+  before_script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}"
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - cargo install cargo-bundle --locked --version "${CARGO_BUNDLE_VERSION}"
+  script:
+    # The .app carries only an ad-hoc signature; users right-click -> Open on first launch.
+    - bash packaging/package.sh
+    - |
+      curl --fail --silent --show-error \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        --upload-file "dist/${ASSET}" \
+        "${PKG_URL}/${ASSET}"
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+# Needs GitLab SaaS Windows runners enabled for the project. Unverified at
+# runtime — see README. PowerShell, so the release binary is copied here
+# directly instead of through packaging/package.sh.
+package:windows:
+  extends: .package-rules
+  stage: package
+  tags: [saas-windows-medium-amd64]
+  when: manual
+  allow_failure: true
+  variables:
+    ASSET: "aircord-windows-amd64.exe"
+  script:
+    - Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -OutFile rustup-init.exe
+    - ./rustup-init.exe -y --profile minimal --default-toolchain $env:RUST_VERSION
+    - $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
+    - cargo build --release --locked -p aircord
+    - New-Item -ItemType Directory -Force -Path dist
+    - Copy-Item target/release/aircord.exe "dist/$env:ASSET"
+    - |
+      curl.exe --fail --silent --show-error `
+        --header "JOB-TOKEN: $env:CI_JOB_TOKEN" `
+        --upload-file "dist/$env:ASSET" `
+        "$env:PKG_URL/$env:ASSET"
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+# ------------------------------------------------------------------ release --
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: package:linux
+      artifacts: false
+  script:
+    - echo "Publishing release ${CI_COMMIT_TAG}"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Aircord $CI_COMMIT_TAG"
+    description: |
+      Packages for this release are in the
+      [package registry]($CI_PROJECT_URL/-/packages).
+
+      The macOS app is unsigned — right-click → *Open* on first launch.
+      Linux and Windows builds are provided but their runtime is unverified.
+    assets:
+      links:
+        - name: "Linux (amd64, .tar.xz)"
+          url: "${PKG_URL}/aircord-linux-amd64.tar.xz"
