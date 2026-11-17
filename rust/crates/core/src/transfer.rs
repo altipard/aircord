@@ -635,6 +635,36 @@ mod tests {
     }
 
     #[test]
+    fn a_link_lost_mid_transfer_stops_it_and_leaves_the_state_open() {
+        let link = device();
+        link.drop_on_set("TDC");
+        let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("PRO", "3,5"), ("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
+        let (out, progress) = run(&link, &changes);
+        assert_eq!(link.sent(), ["AT+PRO=3,5", "AT+TDC=1800"], "nothing after the drop, no AT+CFG on a dead link");
+        assert_eq!(out.fields[0].status, Status::Unverified { why: "Keine Verbindung zum Gerät.".into() });
+        assert_eq!(
+            out.fields[1].status,
+            Status::Unverified { why: "Verbindung verloren. Erneutes Lesen: Keine Verbindung zum Gerät.".into() }
+        );
+        assert_eq!(out.fields[2].status, Status::Failed { why: "Verbindung verloren, nicht gesendet.".into() });
+        assert!(out.reboot_needed, "PRO was taken and needs a restart");
+        assert!(out.readback.is_none());
+        assert_eq!(progress.last(), Some(&Progress::Verifying), "the read-back was tried");
+    }
+
+    #[test]
+    fn values_with_commas_and_quotes_go_out_and_verify_as_entered() {
+        let link = device();
+        let wanted = want(&[("DNSCFG", "\"1.1.1.1\", \"8.8.4.4\""), ("SHTEMP", "-5,30"), ("CLOCKLOG", "1,0,30,4")]);
+        let changes = plan(&s31_template(), &Cfg::parse_text(S31), &wanted).unwrap();
+        let (out, _) = run(&link, &changes);
+        assert_eq!(link.sent(), ["AT+SHTEMP=-5,30", "AT+DNSCFG=\"1.1.1.1\", \"8.8.4.4\"", "AT+CLOCKLOG=1,0,30,4", "AT+CFG"]);
+        assert!(out.all_verified(), "{:?}", out.fields);
+        assert_eq!(link.cfg_value("DNSCFG").as_deref(), Some("\"1.1.1.1\", \"8.8.4.4\""));
+        assert!(out.reboot_needed, "DNSCFG and CLOCKLOG need a restart");
+    }
+
+    #[test]
     fn the_read_back_hides_the_template_s_own_secrets() {
         let tpl = parse(
             "name = \"x\"\n[[setting]]\nkey = \"TOKEN\"\nlabel = \"t\"\ngroup = \"g\"\ntype = \"secret\"\n\
