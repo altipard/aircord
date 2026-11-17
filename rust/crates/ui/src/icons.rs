@@ -1,6 +1,7 @@
 //! The icons: monochrome outlines on a 24 × 24 grid, one 1.5 pt pen at every size, no fills. The mechanism (and the
 //! Search, Close, Copy, Delete, Open, Save, Link and Check drawings) come from BIMCraft's `icons.rs`; the rest are
-//! Aircord's own in the same hand, the Sun and Moon of the theme switch after PhotoCraft's title bar.
+//! Aircord's own in the same hand, the Sun and Moon of the theme switch after
+//! PhotoCraft's title bar (MIT, see THIRD-PARTY-NOTICES.md in the repository root).
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 use std::f32::consts::TAU;

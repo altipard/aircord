@@ -350,6 +350,27 @@ fn saving_the_log_writes_a_file_and_says_where() {
     assert!(std::fs::read_to_string(files[0].path()).unwrap().contains("-- hello --"));
 }
 
+#[test]
+fn the_theme_switch_flips_between_light_and_dark() {
+    let mut w = world(FakeLink::console("aa", "D20-NB"));
+    assert_eq!(w.h.ctx.theme(), egui::Theme::Light, "light is the default");
+    press(&mut w.h, "Dark theme");
+    assert_eq!(w.h.ctx.theme(), egui::Theme::Dark);
+    assert!(w.h.query_by_label("Light theme").is_some(), "the switch now offers the way back");
+    assert!(w.h.query_by_label("Dark theme").is_none());
+    press(&mut w.h, "Light theme");
+    assert_eq!(w.h.ctx.theme(), egui::Theme::Light);
+    assert!(w.h.query_by_label("Dark theme").is_some());
+}
+
+#[test]
+fn the_rail_names_its_dialogs() {
+    let w = world(FakeLink::console("aa", "D20-NB"));
+    for name in ["Sessions", "Playbooks", "Firmware"] {
+        assert!(w.h.query_by_label(name).is_some(), "{name} is in the rail");
+    }
+}
+
 /// Renders the window in both themes to PNGs under `$AIRCORD_SHOTS` (default: the system temp dir).
 #[cfg(feature = "screenshot")]
 #[test]

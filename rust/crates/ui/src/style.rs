@@ -4,8 +4,9 @@
 //! colours a console needs: what was sent, what came back, warnings, success.
 //!
 //! The surface, text, accent and primary tokens, the radii and the egui visuals in [`apply`] come from PhotoCraft's
-//! `crates/ui-egui/src/theme.rs` (`ThemeKind::StudioLight` and `ThemeKind::Studio`; MIT OR Apache-2.0). Translucent
-//! accent tints are flattened onto the card colour here.
+//! `crates/ui-egui/src/theme.rs` (`ThemeKind::StudioLight` and `ThemeKind::Studio`; MIT, see THIRD-PARTY-NOTICES.md
+//! in the repository root). Translucent accent tints are flattened onto the card colour here; text and status colours
+//! are darkened (light) or lightened (dark) where needed to hold 4.5:1, which the tests check.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -37,8 +38,10 @@ pub struct Palette {
     pub pressed: Color32,
     pub text: Color32,
     pub muted: Color32,
-    /// Timestamps, hints, disabled labels.
+    /// Timestamps and info text: still 4.5:1 on every surface.
     pub faint: Color32,
+    /// Disabled labels and icons only: the one tone allowed below 4.5:1.
+    pub disabled: Color32,
     pub icon: Color32,
     /// Hairlines between areas.
     pub separator: Color32,
@@ -88,15 +91,16 @@ pub const LIGHT: Palette = Palette {
     pressed: rgb(0xDCDCE2),
     text: rgb(0x18181C),
     muted: rgb(0x60606A),
-    faint: rgb(0x8C8C96),
+    faint: rgb(0x6C6C76),
+    disabled: rgb(0xA4A4AC),
     icon: rgb(0x3C3C44),
     separator: rgb(0xE2E2E8),
     primary: rgb(0x141418),
     primary_text: rgb(0xFAFAFC),
     shadow: Color32::from_black_alpha(50),
-    error: rgb(0xD23C3C),
-    warn: rgb(0xA86E0A),
-    ok: rgb(0x16803D),
+    error: rgb(0xB82E2E),
+    warn: rgb(0x8A5A00),
+    ok: rgb(0x13723A),
     ok_fill: rgb(0xE6F5EA),
     warn_fill: rgb(0xFBF1DC),
     error_fill: rgb(0xFBE6E6),
@@ -121,7 +125,8 @@ pub const DARK: Palette = Palette {
     pressed: rgb(0x38383E),
     text: rgb(0xECECF0),
     muted: rgb(0x96969E),
-    faint: rgb(0x74747C),
+    faint: rgb(0x8A8A92),
+    disabled: rgb(0x55555C),
     icon: rgb(0xC4C4CC),
     separator: rgb(0x26262A),
     primary: rgb(0xF6F6F8),
@@ -313,5 +318,46 @@ mod tests {
         WEIGHTS.with(|w| w.set(true));
         assert_eq!(medium(13.0).family, FontFamily::Name(MEDIUM.into()));
         WEIGHTS.with(|w| w.set(false));
+    }
+
+    /// WCAG 2 contrast ratio of two opaque colours.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let f = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
+        };
+        let (hi, lo) = if lum(a) > lum(b) { (lum(a), lum(b)) } else { (lum(b), lum(a)) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    #[test]
+    fn text_holds_4_5_to_1_and_the_focus_ring_3_to_1_in_both_themes() {
+        for (name, p) in [("light", &LIGHT), ("dark", &DARK)] {
+            for (what, ink) in [("text", p.text), ("muted", p.muted), ("faint", p.faint)] {
+                for (on, bg) in [("chrome", p.chrome), ("dock", p.dock), ("card", p.card), ("field", p.field)] {
+                    let c = contrast(ink, bg);
+                    assert!(c >= 4.5, "{name}: {what} on {on} is {c:.2}:1");
+                }
+            }
+            for (what, ink, bg) in [
+                ("ok on its fill", p.ok, p.ok_fill),
+                ("warn on its fill", p.warn, p.warn_fill),
+                ("error on its fill", p.error, p.error_fill),
+                ("error on a field", p.error, p.field),
+                ("sent on the terminal", p.sent, p.card),
+                ("note on the terminal", p.note, p.card),
+                ("primary text", p.primary_text, p.primary),
+            ] {
+                let c = contrast(ink, bg);
+                assert!(c >= 4.5, "{name}: {what} is {c:.2}:1");
+            }
+            for (on, bg) in [("chrome", p.chrome), ("card", p.card), ("field", p.field)] {
+                let c = contrast(p.accent, bg);
+                assert!(c >= 3.0, "{name}: the focus ring on {on} is {c:.2}:1");
+            }
+        }
     }
 }

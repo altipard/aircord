@@ -317,7 +317,11 @@ impl App {
         Panel::top("titlebar").frame(widgets::chrome(Margin::symmetric(12, 5))).show(ui, |ui| self.title_bar(ui));
         Panel::top("options").frame(widgets::chrome(Margin::symmetric(12, 6))).show(ui, |ui| self.options_bar(ui));
         Panel::bottom("status").frame(widgets::chrome(Margin::symmetric(12, 3))).show(ui, |ui| self.status_bar(ui));
-        Panel::left("rail").frame(widgets::chrome(Margin::symmetric(9, 10))).resizable(false).exact_size(52.0).show(ui, |ui| self.rail(ui));
+        Panel::left("rail")
+            .frame(widgets::chrome(Margin::symmetric(4, 8)))
+            .resizable(false)
+            .exact_size(widgets::RAIL_W + 8.0)
+            .show(ui, |ui| self.rail(ui));
         // The dock: the cards sit on it 8 pt apart, as PhotoCraft's panels do.
         let dock = |m: Margin| Frame::new().fill(pal().dock).inner_margin(m);
         // The docks start narrower in a small window, so the terminal keeps room beside them.
@@ -660,7 +664,7 @@ impl App {
     /// The icon rail: the dialogs, the open one marked.
     fn rail(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.spacing_mut().item_spacing.y = 4.0;
             let open = |m: &Option<Modal>| match m {
                 Some(Modal::Sessions(_)) => 0,
                 Some(Modal::Playbooks(_)) => 1,
@@ -688,7 +692,7 @@ impl App {
             ui.set_min_height(20.0);
             ui.spacing_mut().item_spacing.x = 6.0;
             let (dot, text) = match &self.conn {
-                Conn::Idle => (pal().faint, "not connected".to_string()),
+                Conn::Idle => (pal().disabled, "not connected".to_string()),
                 Conn::Connecting => (pal().warn, "connecting…".to_string()),
                 Conn::Connected { name, profile, .. } => (pal().ok, format!("{name} · {profile}")),
                 Conn::Bootloader { name } => (pal().warn, format!("bootloader {name}")),

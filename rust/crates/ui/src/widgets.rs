@@ -1,11 +1,12 @@
 //! Pieces every part of the window uses, in PhotoCraft's hand: buttons drawn by hand (an icon, a focus ring, the dark
 //! primary), pill tabs, cards on the dock, quiet fields with an icon or a unit, the icon rail's buttons, hairlines, the
 //! alert strip. Each is named for screen readers and tests by its label. The shapes follow PhotoCraft's
-//! `crates/ui-egui/src/widgets.rs` (`pill_tab`, `card`, `button_impl`, `text_field`, `hairline`; MIT OR Apache-2.0).
+//! `crates/ui-egui/src/widgets.rs` (`pill_tab`, `card`, `button_impl`, `text_field`, `hairline`; MIT, see
+//! THIRD-PARTY-NOTICES.md in the repository root).
 
 use egui::{
-    Align, Color32, CornerRadius, Frame, Layout, Margin, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
-    WidgetInfo, WidgetType, pos2, vec2,
+    Align, Color32, CornerRadius, CursorIcon, Frame, Layout, Margin, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextEdit,
+    Ui, UiBuilder, WidgetInfo, WidgetType, epaint::RectShape, pos2, vec2,
 };
 
 use crate::icons::{self, Icon};
@@ -66,7 +67,7 @@ pub fn button_named(ui: &mut Ui, icon: Option<Icon>, label: &str, name: &str, to
         Tone::Plain => (quiet(pal().field), Stroke::new(1.0, pal().field_border), pal().text),
     };
     // Disabled, every tone looks the same quiet way: a washed-out primary reads as broken, not as unavailable.
-    let (fill, stroke, ink) = if enabled { (fill, stroke, ink) } else { (pal().field, Stroke::new(1.0, pal().separator), pal().faint) };
+    let (fill, stroke, ink) = if enabled { (fill, stroke, ink) } else { (pal().field, Stroke::new(1.0, pal().separator), pal().disabled) };
     let p = ui.painter();
     if r.has_focus() {
         p.rect_stroke(rect.expand(2.0), RADIUS_SM + 2, Stroke::new(2.0, pal().accent), StrokeKind::Outside);
@@ -86,10 +87,33 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     icon_toggle(ui, icon, label, label, false, 28.0)
 }
 
-/// An icon rail button: [`icon_button`], larger, with a tooltip of its own, tinted with the accent while what it opens
-/// is open (as PhotoCraft's tool rail marks the active tool).
+/// Width of the icon rail's content: room for the longest short label under its icon.
+pub const RAIL_W: f32 = 58.0;
+
+/// An icon rail tile: the icon with its short name under it, so it is found without the tooltip; tinted with the
+/// accent while what it opens is open (as PhotoCraft's tool rail marks the active tool).
 pub fn rail_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, active: bool) -> Response {
-    icon_toggle(ui, icon, label, tip, active, 34.0)
+    let (rect, r) = ui.allocate_exact_size(vec2(RAIL_W, 48.0), Sense::click());
+    let enabled = ui.is_enabled();
+    r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, label));
+    let p = ui.painter();
+    if active {
+        p.rect(rect, RADIUS_SM, pal().select_fill, Stroke::new(1.0, pal().accent_border), StrokeKind::Inside);
+    } else if r.hovered() && enabled {
+        p.rect_filled(rect, RADIUS_SM, pal().hover_fill);
+    }
+    if r.has_focus() {
+        p.rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+    }
+    let (ink, text) = match (enabled, active) {
+        (false, _) => (pal().disabled, pal().disabled),
+        (true, true) => (pal().accent, pal().text),
+        (true, false) => (pal().icon, pal().muted),
+    };
+    icons::paint(p, icon, Rect::from_center_size(pos2(rect.center().x, rect.top() + 17.0), vec2(20.0, 20.0)), ink);
+    let name = p.layout_no_wrap(label.to_string(), style::medium(10.5), text);
+    p.galley_with_override_text_color(pos2(rect.center().x - name.size().x / 2.0, rect.bottom() - 6.0 - name.size().y), name, text);
+    r.on_hover_text(tip)
 }
 
 fn icon_toggle(ui: &mut Ui, icon: Icon, label: &str, tip: &str, active: bool, side: f32) -> Response {
@@ -106,7 +130,7 @@ fn icon_toggle(ui: &mut Ui, icon: Icon, label: &str, tip: &str, active: bool, si
         p.rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
     }
     let ink = match (enabled, active) {
-        (false, _) => pal().faint.gamma_multiply(0.6),
+        (false, _) => pal().disabled,
         (true, true) => pal().accent,
         (true, false) => pal().icon,
     };
@@ -168,14 +192,16 @@ pub fn card() -> Frame {
     })
 }
 
-/// A quiet field: field fill, hairline border that takes the accent while typing, an optional icon before the text
-/// and a dimmed unit after it. The caller builds the edit (id, hint, font, password); the field draws its frame.
+/// A quiet field: field fill, hairline border, an optional icon before the text and a dimmed unit after it. Hovered it
+/// shades a step; typing, it carries the same 2 pt accent ring as a focused button; a click anywhere in it, the
+/// padding and the icon too, puts the cursor in it. The caller builds the edit (id, hint, font, password).
 pub fn field(ui: &mut Ui, edit: TextEdit<'_>, icon: Option<Icon>, unit: Option<&str>, width: f32) -> Response {
     let (rect, _) = ui.allocate_exact_size(vec2(width.max(48.0), CONTROL_H), Sense::hover());
     let enabled = ui.is_enabled();
-    ui.painter().rect_filled(rect, RADIUS_SM, pal().field);
+    // The fill goes under the edit, but whether it shows hover and focus is known only after the edit is laid out.
+    let fill = ui.painter().add(Shape::Noop);
     let mut inner = rect.shrink2(vec2(8.0, 2.0));
-    let ink = if enabled { pal().muted } else { pal().faint.gamma_multiply(0.6) };
+    let ink = if enabled { pal().muted } else { pal().disabled };
     if let Some(icon) = icon {
         icons::paint(ui.painter(), icon, Rect::from_center_size(pos2(inner.left() + 7.0, rect.center().y), vec2(14.0, 14.0)), ink);
         inner.min.x += 20.0;
@@ -188,8 +214,21 @@ pub fn field(ui: &mut Ui, edit: TextEdit<'_>, icon: Option<Icon>, unit: Option<&
     let mut child = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)));
     child.spacing_mut().interact_size.y = inner.height();
     let r = child.add(edit.frame(Frame::NONE).desired_width(inner.width()).vertical_align(Align::Center));
-    let border = if r.has_focus() { pal().accent_border } else { pal().field_border };
-    ui.painter().rect_stroke(rect, RADIUS_SM, Stroke::new(1.0, border), StrokeKind::Inside);
+    let over = enabled && ui.rect_contains_pointer(rect);
+    if over && !r.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::Text);
+        if ui.input(|i| i.pointer.primary_clicked()) {
+            r.request_focus();
+        }
+    }
+    let focused = r.has_focus();
+    let shade = if over && !focused { pal().hover_fill } else { pal().field };
+    ui.painter().set(fill, RectShape::filled(rect, RADIUS_SM, shade));
+    if focused {
+        ui.painter().rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
+    } else {
+        ui.painter().rect_stroke(rect, RADIUS_SM, Stroke::new(1.0, pal().field_border), StrokeKind::Inside);
+    }
     r
 }
 
