@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use aircord_core::banner;
+use aircord_core::banner::{self, BatteryLevel, Network, NodeStatus, UploadResult};
 use aircord_core::cfg::Cfg;
 use aircord_core::lines::NoLine;
 use aircord_core::link::{Device, Link};
@@ -51,8 +51,8 @@ pub(crate) enum Read {
 /// The guided view's state for the connected device.
 #[derive(Default)]
 pub(crate) struct Guided {
-    /// What the device's own start lines said.
-    pub(crate) status: banner::Status,
+    /// What the device's own lines said: its start, its network, its uploads.
+    pub(crate) status: NodeStatus,
     /// Since when (egui's time) the device reports no network.
     no_net_since: Option<f64>,
     pub(crate) read: Read,
@@ -73,28 +73,88 @@ pub(crate) struct StatusRow {
     pub(crate) text: String,
 }
 
-/// The status card's lines from what the device said while starting. Values from an upload (battery, temperature,
-/// humidity, the last upload's time) are further rows of the same kind: add them here.
-pub(crate) fn status_rows(s: &banner::Status) -> Vec<StatusRow> {
+/// A number the German way: `3,54`.
+fn german(value: f64, decimals: usize) -> String {
+    format!("{value:.decimals$}").replace('.', ",")
+}
+
+/// A moment as the wall clock showed it: `14:32`.
+pub(crate) fn clock(at: SystemTime) -> String {
+    chrono::DateTime::<chrono::Local>::from(at).format("%H:%M").to_string()
+}
+
+/// The network's row: how good it is in a word, the cell's level where the device named it, the band.
+fn network_row(s: &NodeStatus) -> StatusRow {
     let row = |mark, text: String| StatusRow { mark, text };
-    if *s == banner::Status::default() {
+    let cell = match s.network {
+        Network::Connected { cell, .. } => cell,
+        _ => None,
+    };
+    // The band of the cell the device sits in, once it said so; until then the bands it is set to.
+    let band = cell.and_then(|c| c.band).map(|b| b.to_string()).or_else(|| s.boot.band.clone());
+    let band = band.map(|b| format!(" · Band {b}")).unwrap_or_default();
+    match s.boot.signal {
+        Some(sig) if sig.has_network() => {
+            let level = cell.and_then(|c| c.rssi_dbm).or_else(|| sig.dbm()).map(|d| format!(" · {d} dBm")).unwrap_or_default();
+            row(Mark::Ok, format!("Netz {}{level}{band}", sig.text()))
+        }
+        Some(_) => row(Mark::Warn, format!("Kein Netz{band}")),
+        None if matches!(s.network, Network::Searching { .. }) => row(Mark::Idle, format!("Netz wird gesucht{band}")),
+        None => row(Mark::Idle, format!("Netz: noch keine Meldung{band}")),
+    }
+}
+
+/// The status card's lines from what the device printed by itself: its start, its network, and what an upload said
+/// about the battery, the readings and how the upload went.
+pub(crate) fn status_rows(s: &NodeStatus) -> Vec<StatusRow> {
+    let row = |mark, text: String| StatusRow { mark, text };
+    if *s == NodeStatus::default() {
         return vec![row(Mark::Idle, "Noch keine Statusmeldung vom Gerät".into())];
     }
     let mut rows = Vec::new();
-    if s.password_ok {
+    if s.boot.password_ok {
         rows.push(row(Mark::Ok, "Passwort angenommen".into()));
     }
-    if s.imsi.is_some() {
+    if s.boot.imsi.is_some() {
         rows.push(row(Mark::Ok, "SIM-Karte erkannt".into()));
     }
-    let band = s.band.as_ref().map(|b| format!(" · Band {b}")).unwrap_or_default();
-    rows.push(match s.signal {
-        Some(sig) if sig.has_network() => row(Mark::Ok, format!("Netz {}{band}", sig.text())),
-        Some(_) => row(Mark::Warn, format!("Kein Netz{band}")),
-        None => row(Mark::Idle, format!("Netz: noch keine Meldung{band}")),
-    });
-    if s.apn_set {
+    rows.push(network_row(s));
+    if s.boot.apn_set {
         rows.push(row(Mark::Ok, "Zugangspunkt gesetzt".into()));
+    }
+    if let Some(b) = s.battery {
+        let mark = match b.level() {
+            BatteryLevel::Good => Mark::Ok,
+            BatteryLevel::Low => Mark::Warn,
+            BatteryLevel::Critical => Mark::Refused,
+        };
+        rows.push(row(mark, format!("Batterie {} V · {}", german(b.volts(), 2), b.level().text())));
+    }
+    // The readings of the upload under way, else of the last one.
+    if let Some(r) = s.upload.as_ref().or(s.last_upload.as_ref()).map(|u| &u.readings) {
+        if let Some(t) = r.temperature {
+            rows.push(row(Mark::Ok, format!("Temperatur {} °C", german(t, 1))));
+        }
+        if let Some(h) = r.humidity {
+            rows.push(row(Mark::Ok, format!("Luftfeuchte {} %", german(h, 0))));
+        }
+        for (n, probe) in &r.probes {
+            let name = if r.probes.len() > 1 { format!("Externer Fühler {n}") } else { "Externer Fühler".to_string() };
+            rows.push(match probe {
+                Some(t) => row(Mark::Ok, format!("{name} {} °C", german(*t, 1))),
+                None => row(Mark::Idle, format!("{name} nicht angeschlossen")),
+            });
+        }
+    }
+    if s.upload.is_some() {
+        rows.push(row(Mark::Idle, "Sendet gerade Messwerte …".into()));
+    } else if let Some(up) = &s.last_upload {
+        let at = clock(up.ended.unwrap_or(up.started));
+        rows.push(match up.result {
+            UploadResult::Sent => row(Mark::Ok, format!("Letzte Sendung {at} · erfolgreich")),
+            UploadResult::Failed => row(Mark::Warn, format!("Letzte Sendung {at} · fehlgeschlagen")),
+            UploadResult::Interrupted | UploadResult::Running => row(Mark::Warn, format!("Letzte Sendung {at} · abgebrochen")),
+        });
     }
     rows
 }
@@ -419,10 +479,10 @@ impl App {
 
     /// A reply line, for the status card.
     pub(crate) fn feed_status(&mut self, line: &str) {
-        if !self.guided.status.feed(line) {
+        if !self.guided.status.feed(line, SystemTime::now()) {
             return;
         }
-        match self.guided.status.signal {
+        match self.guided.status.boot.signal {
             Some(s) if !s.has_network() => {
                 self.guided.no_net_since.get_or_insert(self.now);
             }
@@ -446,7 +506,7 @@ impl App {
     /// password was right. A device does not announce that it wants one, so this is the one place that decides. A
     /// refusal or a dump without a model is an answer, and a password would not change it.
     pub(crate) fn wants_password(&self) -> bool {
-        matches!(&self.guided.read, Read::Failed(why) if Failure::of(why) == Failure::Timeout) && !self.guided.status.password_ok
+        matches!(&self.guided.read, Read::Failed(why) if Failure::of(why) == Failure::Timeout) && !self.guided.status.boot.password_ok
     }
 
     /// The settings arrived, or did not.
@@ -868,11 +928,11 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use aircord_core::banner::{Signal, Status};
 
     use super::*;
 
     const BOOT: &str = include_str!("../../core/testdata/s31-nb-v1.4.0-boot.txt");
+    const UPLOAD: &str = include_str!("../../core/testdata/s31-nb-v1.4.0-upload.txt");
 
     #[test]
     fn a_read_s_failure_is_said_without_commands() {
@@ -892,15 +952,15 @@ mod tests {
         }
     }
 
-    fn texts(s: &Status) -> Vec<(Mark, String)> {
+    fn texts(s: &NodeStatus) -> Vec<(Mark, String)> {
         status_rows(s).into_iter().map(|r| (r.mark, r.text)).collect()
     }
 
     #[test]
     fn the_status_card_reads_the_real_boot_lines() {
-        let mut s = Status::default();
+        let mut s = NodeStatus::default();
         assert_eq!(texts(&s), [(Mark::Idle, "Noch keine Statusmeldung vom Gerät".to_string())]);
-        s = Status::from_lines(BOOT.lines());
+        s = NodeStatus::from_lines(BOOT.lines(), SystemTime::UNIX_EPOCH);
         assert_eq!(
             texts(&s),
             [
@@ -910,10 +970,63 @@ mod tests {
                 (Mark::Ok, "Zugangspunkt gesetzt".to_string()),
             ]
         );
-        s.signal = Some(Signal(17));
-        assert_eq!(texts(&s)[2], (Mark::Ok, "Netz gut · Band 8,20".to_string()));
-        s.signal = None;
+        s.feed("Signal Strength:17", SystemTime::UNIX_EPOCH);
+        assert_eq!(texts(&s)[2], (Mark::Ok, "Netz gut · -79 dBm · Band 8,20".to_string()), "the level from the signal alone");
+        s.boot.signal = None;
         assert_eq!(texts(&s)[2].0, Mark::Idle);
+    }
+
+    #[test]
+    fn the_status_card_reads_a_real_upload() {
+        let at = |secs: u64| SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000 + secs);
+        let mut s = NodeStatus::default();
+        let mut lines = UPLOAD.lines().enumerate().peekable();
+        while let Some((i, line)) = lines.next_if(|(_, l)| !l.contains("Send complete")) {
+            s.feed(line, at(60 * i as u64));
+        }
+        assert_eq!(texts(&s).last(), Some(&(Mark::Idle, "Sendet gerade Messwerte …".to_string())), "while the block is open");
+        let mut ended = at(0);
+        for (i, line) in lines {
+            ended = at(60 * i as u64);
+            s.feed(line, ended);
+        }
+        assert_eq!(
+            texts(&s),
+            [
+                (Mark::Ok, "Passwort angenommen".to_string()),
+                (Mark::Ok, "SIM-Karte erkannt".to_string()),
+                (Mark::Ok, "Netz gut · -80 dBm · Band 8".to_string()),
+                (Mark::Ok, "Zugangspunkt gesetzt".to_string()),
+                (Mark::Ok, "Batterie 3,54 V · gut".to_string()),
+                (Mark::Ok, "Temperatur 23,6 °C".to_string()),
+                (Mark::Ok, "Luftfeuchte 46 %".to_string()),
+                (Mark::Idle, "Externer Fühler nicht angeschlossen".to_string()),
+                (Mark::Ok, format!("Letzte Sendung {} · erfolgreich", clock(ended))),
+            ]
+        );
+        assert_eq!(clock(ended).len(), 5, "hours and minutes: {}", clock(ended));
+
+        // The battery's level decides its mark; a block cut off by the next one counts as broken off.
+        s.feed("*****Upload start:1*****", at(7200));
+        s.feed("remaining battery =3050 mv", at(7201));
+        s.feed("DS18B20(1) temp is 21.3", at(7202));
+        s.feed("*****Upload start:2*****", at(7300));
+        s.feed("*****End of upload*****", at(7400));
+        let rows = texts(&s);
+        assert!(rows.contains(&(Mark::Refused, "Batterie 3,05 V · fast leer".to_string())), "{rows:?}");
+        assert_eq!(rows.last(), Some(&(Mark::Warn, format!("Letzte Sendung {} · fehlgeschlagen", clock(at(7400))))), "ended unsent");
+        let mut cut = NodeStatus::default();
+        cut.feed("*****Upload start:1*****", at(0));
+        cut.feed("DS18B20(1) temp is 21.3", at(1));
+        cut.feed("NB module is initializing...", at(2));
+        assert_eq!(
+            texts(&cut),
+            [
+                (Mark::Idle, "Netz wird gesucht".to_string()),
+                (Mark::Ok, "Externer Fühler 21,3 °C".to_string()),
+                (Mark::Warn, format!("Letzte Sendung {} · abgebrochen", clock(at(0)))),
+            ]
+        );
     }
 
     #[test]

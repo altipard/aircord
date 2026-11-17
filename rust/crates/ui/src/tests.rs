@@ -726,7 +726,7 @@ fn the_password_typed_before_connecting_unlocks_and_the_status_card_fills() {
     w.h.state_mut().pin = "349011".into();
     lay_connected(&mut w, S31_NAME);
     assert_eq!(w.link.sent(), ["******", "AT+CFG"]);
-    wait(&mut w.h, "the start lines", |a| a.guided.status.signal.is_some());
+    wait(&mut w.h, "the start lines", |a| a.guided.status.boot.signal.is_some());
     for label in ["Passwort angenommen", "SIM-Karte erkannt", "Kein Netz · Band 8,20", "Zugangspunkt gesetzt"] {
         assert!(has(&w, label), "{label}");
     }
@@ -738,7 +738,7 @@ fn the_password_typed_before_connecting_unlocks_and_the_status_card_fills() {
     assert!(has(&w, NO_NETWORK_HINT));
     w.h.state_mut().feed_status("[30100]Signal Strength:17");
     run(&mut w.h);
-    assert!(has(&w, "Netz gut · Band 8,20") && !has(&w, NO_NETWORK_HINT));
+    assert!(has(&w, "Netz gut · -79 dBm · Band 8,20") && !has(&w, NO_NETWORK_HINT));
 }
 
 #[test]
@@ -972,10 +972,14 @@ fn screenshot() {
         press_card(&mut h, S31_NAME);
         shot(&mut h, "devices");
         press(&mut h, "Verbinden");
-        wait(&mut h, "the settings", |a| a.guided.read == Read::Ready && a.guided.status.signal.is_some_and(|s| s.has_network()));
+        wait(&mut h, "the settings", |a| a.guided.read == Read::Ready && a.guided.status.boot.signal.is_some_and(|s| s.has_network()));
         press(&mut h, "Sendeintervall: 15 Minuten");
         shot(&mut h, "dropdown");
         press(&mut h, "1 Stunde");
+        // An upload as the device prints it by itself, so the card shows battery and readings.
+        for line in include_str!("../../core/testdata/s31-nb-v1.4.0-upload.txt").lines() {
+            h.state_mut().feed_status(line);
+        }
         h.state_mut().guided.form.as_mut().unwrap().apply(Edit::Set("SERVADDR".into(), "10.0.0.9,1883".into()));
         shot(&mut h, "guided");
         press(&mut h, "Übertragen");
