@@ -745,14 +745,14 @@ mod tests {
     }
 
     #[test]
-    fn values_with_commas_and_quotes_go_out_and_verify_as_entered() {
+    fn values_with_commas_and_quotes_go_out_in_the_device_s_format_and_verify() {
         let link = device();
         let wanted = want(&[("DNSCFG", "\"1.1.1.1\", \"8.8.4.4\""), ("SHTEMP", "-5,30"), ("CLOCKLOG", "1,0,30,4")]);
         let changes = plan(&s31_template(), &Cfg::parse_text(S31), &wanted).unwrap();
         let (out, _) = run(&link, &changes);
-        assert_eq!(link.sent(), ["AT+SHTEMP=-5,30", "AT+DNSCFG=\"1.1.1.1\", \"8.8.4.4\"", "AT+CLOCKLOG=1,0,30,4", "AT+CFG"]);
+        assert_eq!(link.sent(), ["AT+SHTEMP=-5,30", "AT+DNSCFG=\"1.1.1.1\",\"8.8.4.4\"", "AT+CLOCKLOG=1,0,30,4", "AT+CFG"]);
         assert!(out.all_verified(), "{:?}", out.fields);
-        assert_eq!(link.cfg_value("DNSCFG").as_deref(), Some("\"1.1.1.1\", \"8.8.4.4\""));
+        assert_eq!(link.cfg_value("DNSCFG").as_deref(), Some("\"1.1.1.1\",\"8.8.4.4\""), "as AT+CFG prints it");
         assert!(out.reboot_needed, "DNSCFG and CLOCKLOG need a restart");
     }
 

@@ -208,7 +208,9 @@ on it:
    that differ, in template order. Numbers compare by value (`0900` is `900`);
    text compares part by part between commas, without outer spaces and double
    quotes (`"8.8.8.8", "8.8.4.4"` is `"8.8.8.8","8.8.4.4"`); secrets compare
-   exactly. Settings hidden by `visible_if` are left out. Empty input is
+   exactly. `DNSCFG` goes out without spaces around its commas
+   (`"1.1.1.1","8.8.4.4"`), the form `AT+CFG` prints; other text is sent as
+   entered. Settings hidden by `visible_if` are left out. Empty input is
    refused, except for a `clearable` setting, which is then sent as `NULL`. An
    empty secret is no change at all: a password field left empty keeps the
    device's password. `plan_clearing` takes the keys the person explicitly asked
