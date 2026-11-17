@@ -10,6 +10,7 @@ use crate::cfg::setting_line;
 use crate::lines::{Tap, Taps, lock};
 use crate::link::{Device, Events, Link, mask, summarize_line};
 use crate::otanb::FakeBootloader;
+use crate::redact::redact_line;
 
 /// Events that go nowhere.
 pub struct NoEvents;
@@ -185,7 +186,7 @@ impl FakeLink {
     fn deliver(&self, replies: Vec<String>, resets: bool) {
         let events = self.events();
         for r in replies {
-            events.log(&format!("<< {r}"));
+            events.log(&format!("<< {}", redact_line(&r, &[])));
             self.taps.feed(&r);
         }
         if resets {
@@ -193,7 +194,9 @@ impl FakeLink {
         }
     }
 
+    /// Sends `line`; the log and [`FakeLink::sent`] get `echo` with its passwords masked, as the real link logs it.
     fn write(&self, line: &str, echo: &str) -> bool {
+        let echo = redact_line(echo, &[]);
         {
             let mut s = lock(&self.state);
             if s.connected.is_none() {
@@ -282,5 +285,47 @@ impl Link for FakeLink {
 
     fn lines(&self) -> Tap {
         self.taps.subscribe()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::transfer::read_cfg;
+
+    #[derive(Default)]
+    struct Log(Mutex<Vec<String>>);
+
+    impl Events for Log {
+        fn log(&self, line: &str) {
+            lock(&self.0).push(line.to_string());
+        }
+        fn link_dropped(&self) {}
+        fn scan_failed(&self, _: &str) {}
+    }
+
+    #[test]
+    fn the_log_never_shows_a_password_of_the_real_dump() {
+        let link = FakeLink::configured("A", "866207050000001", include_str!("../../testdata/s31-nb-v1.4.0-cfg.txt"));
+        let log = Arc::new(Log::default());
+        link.set_events(log.clone());
+        link.connect("A");
+        let cfg = read_cfg(&link, Duration::from_millis(200), &AtomicBool::new(false)).unwrap();
+        assert_eq!(cfg.get("PWORD"), Some("kxqmzp"), "the reader still gets the real value");
+        link.send("AT+PWORD=neupwx");
+        link.send("AT+PWD=mqtt-geheim");
+        read_cfg(&link, Duration::from_millis(200), &AtomicBool::new(false)).unwrap();
+        let lines = lock(&log.0).clone();
+        for secret in ["kxqmzp", "neupwx", "mqtt-geheim"] {
+            assert!(lines.iter().all(|l| !l.contains(secret)), "{secret} in {lines:?}");
+        }
+        for masked in [">> AT+PWORD=******", ">> AT+PWD=******", "<< AT+PWORD=******", "<< AT+PWD=******"] {
+            assert!(lines.iter().any(|l| l == masked), "{masked} missing in {lines:?}");
+        }
+        assert!(lines.iter().any(|l| l == "<< AT+TDC=900"), "other lines stay as they are");
+        assert!(link.sent().iter().all(|s| !s.contains("neupwx")), "{:?}", link.sent());
     }
 }

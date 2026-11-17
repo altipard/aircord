@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use aircord_core::lines::{Tap, Taps, append_lines};
 use aircord_core::link::{Device, Events, Link, mask, summarize_line};
+use aircord_core::redact::redact_line;
 use btleplug::api::{Central, CentralEvent, CharPropFlags, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::StreamExt;
@@ -102,6 +103,8 @@ impl BleLink {
         if !self.is_connected() {
             return false;
         }
+        // The echo goes to the log: a password typed or sent as a setting must not land in a saved transcript.
+        let echo = redact_line(&echo, &[]).into_owned();
         self.writes.send(Write { data, echo, done }).is_ok()
     }
 }
@@ -262,7 +265,8 @@ async fn notifications(
             return;
         }
         for line in append_lines(&mut buf, &n.value) {
-            shared.events.log(&format!("<< {line}"));
+            // AT+CFG prints AT+PWORD in clear; the tap still gets the real line, the log a masked one.
+            shared.events.log(&format!("<< {}", redact_line(&line, &[])));
             shared.taps.feed(&line);
         }
     }
