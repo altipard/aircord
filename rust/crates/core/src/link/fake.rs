@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::cfg::setting_line;
 use crate::lines::{Tap, Taps, lock};
@@ -44,6 +44,8 @@ struct State {
     silent: BTreeSet<String>,
     /// Keys whose set drops the link, as a device that resets mid-command.
     drops: BTreeSet<String>,
+    /// Replies by exact command that come only after a delay, from another thread.
+    late: BTreeMap<String, (Duration, Vec<String>)>,
 }
 
 /// The fake link. Everything happens inline, on the caller's thread.
@@ -103,6 +105,11 @@ impl FakeLink {
     /// A set of `key` drops the link instead of answering.
     pub fn drop_on_set(&self, key: &str) {
         lock(&self.state).drops.insert(key.into());
+    }
+
+    /// `cmd` is answered with `lines`, but only `after` it was sent.
+    pub fn reply_late(&self, cmd: &str, after: Duration, lines: &[&str]) {
+        lock(&self.state).late.insert(cmd.into(), (after, lines.iter().map(|l| l.to_string()).collect()));
     }
 
     /// What a configured device holds for `key`, as `AT+CFG` would print it.
@@ -172,6 +179,9 @@ impl FakeLink {
             }
             return (Vec::new(), true);
         }
+        if s.late.contains_key(cmd) {
+            return (Vec::new(), false);
+        }
         if setting_line(cmd).is_some_and(|(key, _)| s.drops.contains(key)) {
             return (Vec::new(), true);
         }
@@ -223,6 +233,17 @@ impl FakeLink {
         }
         self.events().log(&format!(">> {echo}"));
         let (replies, resets) = self.answer(line);
+        let late = lock(&self.state).late.get(line.trim_end_matches(['\r', '\n'])).cloned();
+        if let Some((after, lines)) = late {
+            let (taps, events) = (self.taps.clone(), self.events());
+            std::thread::spawn(move || {
+                std::thread::sleep(after);
+                for l in lines {
+                    events.log(&format!("<< {}", redact_line(&l, &[])));
+                    taps.feed(&l);
+                }
+            });
+        }
         self.deliver(replies, resets);
         true
     }

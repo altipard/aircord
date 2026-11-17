@@ -24,6 +24,9 @@ pub const READ_CMD: &str = "AT+CFG";
 /// the wait, so this only caps a device that never stops talking.
 const DUMP_WAITS: u32 = 4;
 
+/// The longest wait for a late reply after a command timed out.
+const SETTLE_MAX: Duration = Duration::from_secs(2);
+
 /// One setting to send.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Change {
@@ -262,10 +265,22 @@ enum Sent {
     Failed(String),
 }
 
+/// Reads and throws away what comes for `d`: the late reply of a command that timed out, so it cannot be taken for
+/// the next command's.
+fn settle(tap: &Tap, d: Duration, stop: &AtomicBool) {
+    let end = Instant::now() + d;
+    while !stop.load(Ordering::Relaxed) {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() || tap.recv(left.min(Duration::from_millis(50))) == Err(NoLine::Closed) {
+            return;
+        }
+    }
+}
+
 /// Sends each change and checks its reply, then reads `AT+CFG` again and reports every change. A refused change does
 /// not stop the others, they are independent settings; a lost link or `stop` does, and the rest are reported as not
 /// sent. A change that got no answer is judged by the read-back like the others, since the device may well have taken
-/// it. Secrets go out through
+/// it; after such a silence the transfer waits a moment and discards a late reply. Secrets go out through
 /// [`Link::send_secret`], so their echo is masked, and no result carries their value. `ATZ` is never sent.
 pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicBool, report: &mut dyn FnMut(Progress)) -> Outcome {
     let tap = link.lines();
@@ -295,7 +310,10 @@ pub fn apply(link: &dyn Link, changes: &[Change], wait: Duration, stop: &AtomicB
         sent.push(match end {
             End::Ok => Sent::Taken,
             End::Error(e) => Sent::Failed(format!("Das Gerät hat den Wert abgelehnt ({e}).")),
-            End::Timeout => Sent::Unanswered("Keine Antwort vom Gerät.".into()),
+            End::Timeout => {
+                settle(&tap, wait.min(SETTLE_MAX), stop);
+                Sent::Unanswered("Keine Antwort vom Gerät.".into())
+            }
             End::Closed => {
                 halted = Some("Verbindung verloren, nicht gesendet.".into());
                 Sent::Unanswered("Verbindung verloren.".into())
@@ -501,6 +519,20 @@ mod tests {
         let (out, _) = run(&link, &changes);
         assert_eq!(out.fields[0].status, Status::Verified);
         assert!(out.reboot_needed);
+    }
+
+    #[test]
+    fn a_late_ok_is_not_taken_for_the_next_command() {
+        let link = device();
+        let wait = Duration::from_millis(300);
+        // TDC answers after its wait is over; SHTEMP refuses, but more slowly than TDC's late OK arrives. Without the
+        // pause after a silence, that OK would be read as SHTEMP's.
+        link.reply_late("AT+TDC=1800", Duration::from_millis(450), &["OK"]);
+        link.reply_late("AT+SHTEMP=20,30", Duration::from_millis(200), &["AT_PARAM_ERROR"]);
+        let changes = plan(&s31_template(), &Cfg::parse_text(S31), &want(&[("TDC", "1800"), ("SHTEMP", "20,30")])).unwrap();
+        let out = apply(&link, &changes, wait, &AtomicBool::new(false), &mut |_| {});
+        assert_eq!(out.fields[1].status, Status::Failed { why: "Das Gerät hat den Wert abgelehnt (AT_PARAM_ERROR).".into() });
+        assert_eq!(out.fields[0].status, Status::Differs { actual: "900".into() }, "late replies do not change the fake");
     }
 
     #[test]
