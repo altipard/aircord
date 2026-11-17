@@ -678,6 +678,56 @@ fn a_secret_of_a_template_found_by_the_model_is_masked_from_its_first_line() {
     assert!(has(&w, "Zugangsschlüssel") && !has_part(&w, "tok-abc"));
 }
 
+/// A device that takes its time with the dump, so the read after a connect is still under way.
+fn slow() -> FakeLink {
+    let link = FakeLink::console("aa", "Sensor 7");
+    link.reply_late("AT+CFG", Duration::from_millis(250), &["AT+MODEL=ZZ9-XX,v0.1.0", "AT+TDC=60", "OK"]);
+    link
+}
+
+/// Connects in the expert view and returns while the settings are still being read.
+fn reading(w: &mut World, name: &str) {
+    press(&mut w.h, "Scan");
+    press(&mut w.h, "Stop");
+    press(&mut w.h, name);
+    press(&mut w.h, "Connect");
+    wait(&mut w.h, "the connection", |a| matches!(a.conn, Conn::Connected { .. }));
+    let link = Arc::clone(&w.link);
+    wait(&mut w.h, "the read to start", |_| link.sent().contains(&"AT+CFG".to_string()));
+    assert_eq!(w.h.state().guided.read, Read::Reading);
+}
+
+#[test]
+fn a_command_typed_during_the_read_goes_out_and_ends_the_read() {
+    let link = slow();
+    link.reply("AT+VER", &["v1.4.2", "OK"]);
+    let mut w = world(link);
+    reading(&mut w, "Sensor 7");
+    w.h.state_mut().cmd = "AT+VER".into();
+    press(&mut w.h, "Send");
+    assert_eq!(w.link.sent(), ["AT+CFG", "AT+VER"], "the command is not held back");
+    assert_eq!(w.h.state().guided.read, Read::Idle, "the read counts as stopped");
+    wait(&mut w.h, "the reply", |a| logged(a, "<< v1.4.2"));
+    std::thread::sleep(Duration::from_millis(700));
+    run(&mut w.h);
+    let app = w.h.state();
+    assert_eq!(app.guided.read, Read::Idle, "the reply was not taken for the dump, nor the late dump for a result");
+    assert!(app.guided.form.is_none() && app.guided.model.is_none());
+    assert!(logged(app, "reading the settings stopped"));
+}
+
+#[test]
+fn a_panel_action_during_the_read_ends_it_too() {
+    let link = FakeLink::console("aa", "X1-NB");
+    link.reply_late("AT+CFG", Duration::from_millis(250), &["AT+MODEL=X1-NB,v1.0.0", "AT+TDC=900", "OK"]);
+    link.reply("AT+FW", &["X1-NB firmware v1.4.2", "OK"]);
+    let mut w = world_with(link, &[("x1.toml", X1)]);
+    reading(&mut w, "X1-NB");
+    press(&mut w.h, "Read: Firmware");
+    assert_eq!(w.h.state().guided.read, Read::Idle);
+    wait(&mut w.h, "the value", |a| a.values.values().any(|v| v == "1.4.2"));
+}
+
 #[test]
 fn a_playbook_takes_the_link_from_a_read_under_way() {
     let link = FakeLink::console("aa", "Sensor 7");

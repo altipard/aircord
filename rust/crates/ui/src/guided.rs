@@ -122,7 +122,9 @@ fn password_accepted(tap: &aircord_core::lines::Tap, wait: Duration, stop: &Atom
     false
 }
 
-/// Sends the password, if there is one, and reads the settings. Waits: a job's thread calls it.
+/// Sends the password, if there is one, and reads the settings. Waits: a job's thread calls it. The password goes out
+/// even when `stop` is already set: stopping ends the reading (someone else needs the link), not the unlocking the
+/// person asked for by typing a password.
 pub(crate) fn read_settings(link: &dyn Link, pin: Option<&str>, wait: Duration, stop: &AtomicBool) -> Result<Cfg, String> {
     let mut tries = 1;
     if let Some(pin) = pin {
@@ -465,14 +467,15 @@ impl App {
         });
     }
 
-    /// Ends a read that is under way, before another job takes the link: a playbook's step would take the dump's `OK`
-    /// for its own, and a firmware update's bootloader must not be sent `AT+CFG`. Its late result is dropped.
+    /// Ends a read that is under way, before something else takes the link: a command typed by hand, whose reply the
+    /// read would take for the dump's; a playbook, whose step would take the dump's `OK` for its own; a firmware
+    /// update, whose bootloader must not be sent `AT+CFG`. Its late result is dropped.
     pub(crate) fn interrupt_read(&mut self) {
         if self.guided.read == Read::Reading {
             self.read_stop.store(true, Ordering::Relaxed);
             self.epoch += 1;
             self.guided.read = Read::Idle;
-            self.log_line("-- reading the settings stopped: another job needs the link --");
+            self.log_line("-- reading the settings stopped: the link is needed for something else --");
         }
     }
 

@@ -616,10 +616,10 @@ impl App {
             }
             // The PIN first, if there is one, then the settings: the guided view's form, and the model for the template.
             let result = guided::read_settings(&*link, Some(pin.as_str()).filter(|p| !p.is_empty()), read_wait, &stop);
+            out.post(Msg::Status(format!("connected: {}", sel.name)));
             if stop.load(std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
-            out.post(Msg::Status(format!("connected: {}", sel.name)));
             out.post(Msg::Cfg { epoch, result });
         });
     }
@@ -666,6 +666,8 @@ impl App {
             self.alert.warn("not connected — connect to a device first");
             return;
         }
+        // The settings being read by themselves give way: the reply would end up in the dump, or the dump in the reply.
+        self.interrupt_read();
         let extra: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
         if redact::is_secret_command(cmd, &extra) {
             self.link.send(cmd);
