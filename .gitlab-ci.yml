@@ -134,7 +134,16 @@ package:windows:
   variables:
     ASSET: "aircord-windows-amd64.exe"
   script:
-    - Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -OutFile rustup-init.exe
+    # Cmdlet errors (download, hash) must fail the job, not just print.
+    - $ErrorActionPreference = 'Stop'
+    - $rustup = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+    - Invoke-WebRequest -Uri $rustup -OutFile rustup-init.exe
+    - Invoke-WebRequest -Uri "$rustup.sha256" -OutFile rustup-init.exe.sha256
+    # Run the installer only if it matches the published checksum.
+    - |
+      $expected = ((Get-Content rustup-init.exe.sha256 -Raw).Trim() -split '\s+')[0].ToLower()
+      $actual = (Get-FileHash rustup-init.exe -Algorithm SHA256).Hash.ToLower()
+      if ($actual -ne $expected) { throw "rustup-init.exe checksum mismatch: expected $expected, got $actual" }
     - ./rustup-init.exe -y --profile minimal --default-toolchain $env:RUST_VERSION
     - $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
     - cargo build --release --locked -p aircord
