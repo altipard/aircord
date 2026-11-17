@@ -175,7 +175,9 @@ pub struct Setting {
     pub visible_if: Option<Condition>,
     /// Shown only in expert mode.
     pub expert: bool,
-    /// An empty input clears the value: the device gets `AT+<key>=NULL`, as `AT+CFG` prints an unset value.
+    /// The value may be cleared: the device gets `AT+<key>=NULL`, as `AT+CFG` prints an unset value. For text an empty
+    /// input clears it; a secret only by an explicit clear ([`crate::transfer::plan_clearing`]), since an empty password
+    /// field means "unchanged".
     pub clearable: bool,
     /// Positions (from 1) of comma-separated parts of a typed value that must differ: `[2, 3]` refuses
     /// `AT+POWER_SAVE=0,8,8`, a window that starts where it ends.
@@ -442,7 +444,8 @@ impl Setting {
 
     /// Checks an entered value and returns what is sent, or why not in words for the person in the field. A secret's
     /// message never repeats the input. For a `clearable` setting an empty input is fine and comes back empty, which
-    /// [`crate::transfer`] sends as `NULL`.
+    /// [`crate::transfer`] sends as `NULL`; for a secret it only gets here from an explicit clear, because
+    /// [`crate::transfer::plan`] takes an empty secret as unchanged.
     pub fn check(&self, input: &str) -> Result<String, String> {
         if input.contains(['\r', '\n']) {
             return Err("Zeilenumbrüche sind nicht erlaubt.".into());

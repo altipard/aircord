@@ -5,7 +5,7 @@
 //!
 //! Like a playbook run, [`apply`] waits on the link: call it from a job's thread.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -91,19 +91,49 @@ pub struct FieldError {
 /// current one is no change and is not checked, so a device value outside the template's rules never blocks the
 /// others. A setting hidden by its `visible_if` (with the wanted values over the current ones) is left out. A key the
 /// template lacks, or that the device did not report, is an error, as is any value [`crate::settings::Setting::check`]
-/// refuses; every error is returned, not just the first. Leave out what the person did not touch: an untouched secret
-/// passed as `""` is a change to empty, which is refused, because an empty value is never sent.
+/// refuses; every error is returned, not just the first.
+///
+/// An empty secret means "unchanged", never "clear": a password field starts empty because the old value is not shown,
+/// so an untouched one must not wipe the device's password. A secret is cleared only through [`plan_clearing`]. An
+/// empty value for a `clearable` setting that is not secret clears it, as before.
 pub fn plan(tpl: &Template, current: &Cfg, wanted: &BTreeMap<String, String>) -> Result<Vec<Change>, Vec<FieldError>> {
+    plan_clearing(tpl, current, wanted, &BTreeSet::new())
+}
+
+/// [`plan`], plus `clear`: the keys the person explicitly asked to empty (a "Löschen" button, not an empty field).
+/// Each goes out as `AT+<KEY>=NULL` unless the device already has it empty; this is the only way to clear a secret. A
+/// key in `clear` must be a `clearable` setting of the template, else it is an error. A key both in `wanted` and in
+/// `clear` is cleared.
+pub fn plan_clearing(
+    tpl: &Template,
+    current: &Cfg,
+    wanted: &BTreeMap<String, String>,
+    clear: &BTreeSet<String>,
+) -> Result<Vec<Change>, Vec<FieldError>> {
     let mut errors = Vec::new();
-    for key in wanted.keys().filter(|k| tpl.setting(k).is_none()) {
+    let unknown: BTreeSet<&String> = wanted.keys().chain(clear).filter(|k| tpl.setting(k).is_none()).collect();
+    for key in unknown {
         errors.push(FieldError { key: key.clone(), label: key.clone(), message: "Diese Einstellung kennt die Vorlage nicht.".into() });
     }
-    let value_of = |k: &str| wanted.get(k).map(String::as_str).or_else(|| current.get(k));
+    let value_of = |k: &str| if clear.contains(k) { Some("") } else { wanted.get(k).map(String::as_str).or_else(|| current.get(k)) };
     let mut changes = Vec::new();
     for s in &tpl.settings {
-        let Some(want) = wanted.get(&s.key) else { continue };
+        let clearing = clear.contains(&s.key);
+        let want = if clearing {
+            ""
+        } else {
+            match wanted.get(&s.key) {
+                Some(w) if s.is_secret() && w.trim().is_empty() => continue,
+                Some(w) => w.as_str(),
+                None => continue,
+            }
+        };
         let error = |message: String| FieldError { key: s.key.clone(), label: s.label.clone(), message };
         if !s.visible(value_of) {
+            continue;
+        }
+        if clearing && !s.clearable {
+            errors.push(error("Diese Einstellung kann nicht geleert werden.".into()));
             continue;
         }
         let Some(have) = current.get(&s.key) else {
@@ -508,6 +538,52 @@ mod tests {
         assert_eq!(link.cfg_value("UNAME").as_deref(), Some("NULL"));
         let apn = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("APN", "")])).unwrap_err();
         assert_eq!(apn[0].message, "Bitte einen Wert eingeben.", "the APN cannot be cleared");
+    }
+
+    /// An S31-NB on MQTT with a password set: the MQTT fields are visible.
+    fn mqtt_dump() -> String {
+        S31.replace("AT+PRO=2,5", "AT+PRO=3,5").replace("AT+PWD=NULL", "AT+PWD=mqtt-alt")
+    }
+
+    #[test]
+    fn a_password_field_left_empty_keeps_the_password() {
+        let dump = mqtt_dump();
+        let link = FakeLink::configured("A", "x", &dump);
+        link.connect("A");
+        let tpl = s31_template();
+        let changes = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("PWD", ""), ("TDC", "1800")])).unwrap();
+        assert_eq!(changes.iter().map(Change::cmd).collect::<Vec<_>>(), ["AT+TDC=1800"]);
+        let (out, _) = run(&link, &changes);
+        assert!(out.all_verified(), "{:?}", out.fields);
+        assert!(!link.sent().iter().any(|c| c.starts_with("AT+PWD")), "{:?}", link.sent());
+        assert_eq!(link.cfg_value("PWD").as_deref(), Some("mqtt-alt"));
+        let blank = plan(&tpl, &Cfg::parse_text(&dump), &want(&[("PWD", "   ")])).unwrap();
+        assert!(blank.is_empty(), "spaces are empty too");
+    }
+
+    #[test]
+    fn only_an_explicit_clear_empties_a_secret() {
+        let dump = mqtt_dump();
+        let link = FakeLink::configured("A", "x", &dump);
+        link.connect("A");
+        let tpl = s31_template();
+        let cfg = Cfg::parse_text(&dump);
+        let clear: BTreeSet<String> = ["PWD".to_string()].into();
+        let changes = plan_clearing(&tpl, &cfg, &want(&[("PWD", "neu"), ("TDC", "1800")]), &clear).unwrap();
+        assert_eq!(changes.iter().map(Change::cmd).collect::<Vec<_>>(), ["AT+PWD=NULL", "AT+TDC=1800"], "the clear wins");
+        assert_eq!(changes[0].shown_cmd(), "AT+PWD=******");
+        let (out, _) = run(&link, &changes);
+        assert!(out.all_verified(), "{:?}", out.fields);
+        assert_eq!(link.cfg_value("PWD").as_deref(), Some("NULL"));
+        assert!(link.sent().iter().all(|c| !c.contains("mqtt-alt")), "{:?}", link.sent());
+
+        let empty = Cfg::parse_text(&dump.replace("AT+PWD=mqtt-alt", "AT+PWD=NULL"));
+        assert!(plan_clearing(&tpl, &empty, &BTreeMap::new(), &clear).unwrap().is_empty(), "already empty");
+        let refused = plan_clearing(&tpl, &cfg, &BTreeMap::new(), &["PWORD".to_string(), "XYZ".to_string()].into()).unwrap_err();
+        let by_key: BTreeMap<&str, &str> = refused.iter().map(|e| (e.key.as_str(), e.message.as_str())).collect();
+        assert_eq!(by_key["PWORD"], "Diese Einstellung kann nicht geleert werden.", "the device password is never cleared");
+        assert_eq!(by_key["XYZ"], "Diese Einstellung kennt die Vorlage nicht.");
+        assert_eq!(refused.len(), 2);
     }
 
     #[test]

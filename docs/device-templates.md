@@ -179,7 +179,7 @@ refused too.
 | `choice` | `options = [{ text, value }]` (required), `custom`, `pattern`, `max_len` | One of the options. With `custom = true` any other value is allowed too, checked by `pattern` and `max_len` (only allowed with `custom`). Option values are unique. |
 | `toggle` | `on`, `off` (both required, different) | The values the two positions send. Inverted device logic is just values: `on = "0,8,16"`, `off = "1,0,0"`. |
 | `text` | `pattern`, `max_len`, `clearable` | Not empty, unless `clearable = true`: then an empty input clears the value and the device gets `AT+<KEY>=NULL`, the way `AT+CFG` prints an unset value. |
-| `secret` | `pattern`, `max_len`, `clearable` | Like `text`, never shown or logged in clear. |
+| `secret` | `pattern`, `max_len`, `clearable` | Like `text`, never shown or logged in clear. An empty input means "unchanged", because the field cannot show the current value; with `clearable = true` the value is cleared only on an explicit request (`transfer::plan_clearing`). |
 
 `distinct = [2, 3]` (for `text`, `secret` and the free text of a `choice`)
 refuses a value whose comma-separated parts at those positions, counted from 1,
@@ -209,10 +209,14 @@ on it:
    text compares part by part between commas, without outer spaces and double
    quotes (`"8.8.8.8", "8.8.4.4"` is `"8.8.8.8","8.8.4.4"`); secrets compare
    exactly. Settings hidden by `visible_if` are left out. Empty input is
-   refused, except for a `clearable` setting, which is then sent as `NULL`. The
-   presets mark the MQTT fields (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`,
-   `SUBTOPIC`) clearable. `needing_confirmation` names the `network` and
-   `irreversible` changes to ask about.
+   refused, except for a `clearable` setting, which is then sent as `NULL`. An
+   empty secret is no change at all: a password field left empty keeps the
+   device's password. `plan_clearing` takes the keys the person explicitly asked
+   to clear; that is the only way to send `NULL` for a secret, and it is refused
+   for a setting that is not `clearable`. The presets mark the MQTT fields
+   (`CLIENT`, `UNAME`, `PWD`, `PUBTOPIC`, `SUBTOPIC`) clearable.
+   `needing_confirmation` names the `network` and `irreversible` changes to ask
+   about.
 4. `apply` sends each change and waits for `OK`. `AT_ERROR`, `AT_PARAM_ERROR` and
    the other `AT_…ERROR` lines mark that field as failed; the others are still
    sent. A command that gets no answer is not failed: the device may have taken
