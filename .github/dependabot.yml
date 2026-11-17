@@ -1,14 +1,14 @@
 version: 2
 updates:
-  # Go module dependencies
-  - package-ecosystem: gomod
+  # Cargo dependencies of the workspace
+  - package-ecosystem: cargo
     directory: "/"
     schedule:
       interval: weekly
     commit-message:
       prefix: build
     groups:
-      go-deps:
+      cargo-deps:
         patterns: ["*"]
 
   # GitHub Actions used by the workflows
