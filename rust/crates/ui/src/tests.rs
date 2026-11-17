@@ -728,8 +728,12 @@ fn a_session_s_template_is_not_replaced_by_the_model_s() {
 
 /// A device that takes its time with the dump, so the read after a connect is still under way.
 fn slow() -> FakeLink {
+    slow_by(Duration::from_millis(250))
+}
+
+fn slow_by(late: Duration) -> FakeLink {
     let link = FakeLink::console("aa", "Sensor 7");
-    link.reply_late("AT+CFG", Duration::from_millis(250), &["AT+MODEL=ZZ9-XX,v0.1.0", "AT+TDC=60", "OK"]);
+    link.reply_late("AT+CFG", late, &["AT+MODEL=ZZ9-XX,v0.1.0", "AT+TDC=60", "OK"]);
     link
 }
 
@@ -778,7 +782,10 @@ fn a_panel_action_during_the_read_ends_it_too() {
 
 #[test]
 fn a_playbook_started_in_the_window_ends_a_read_under_way() {
-    let mut w = world(slow());
+    // Three presses lie between the connect and the run: the dump must not arrive before them on a busy machine.
+    // The playbook asks for the dump itself, so its own wait has to outlast the slow answer.
+    let mut w = world(slow_by(Duration::from_millis(600)));
+    w.h.state_mut().timing.reply_wait = Duration::from_secs(1);
     reading(&mut w, "Sensor 7");
     press(&mut w.h, "Playbooks");
     press(&mut w.h, "Run");
