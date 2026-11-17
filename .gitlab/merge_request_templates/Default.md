@@ -4,7 +4,7 @@
 
 ## How it was verified
 
-- [ ] `task check` passes (gofmt, vet, lint, tests)
+- [ ] `task check` passes (fmt check, clippy, tests)
 - [ ] Tested against real hardware — device and firmware:
 - [ ] Not tested against hardware (GUI and BLE behaviour cannot run in CI)
 

@@ -8,15 +8,13 @@ configuring a sensor should not have to remember whether the uplink interval is
 A template can also describe the device's **settings** as typed fields
 (`[[setting]]`): the current values come from `AT+CFG`, only what changed is
 sent, and `AT+CFG` is read again to check the result. See [Settings](#settings).
-The Rust core (`rust/crates/core`: `settings`, `cfg`, `transfer`) implements
-this; the settings form in the window is not built yet, and the Go build ignores
-`[[setting]]`.
+The core (`crates/core`: `settings`, `cfg`, `transfer`) implements this; the
+guided view turns it into a settings form.
 
 Templates are TOML. Aircord ships presets inside the binary, and reads your own
 from `<config>/aircord/templates/`. A file whose `name` matches a preset
 replaces it, so you can adapt a shipped template without patching the source.
-The Rust build's presets live in `rust/crates/core/presets/`; the Go build's in
-`internal/device/presets/`.
+The presets live in `crates/core/presets/`.
 
 ## Structure
 
@@ -47,8 +45,11 @@ You can always override the choice from the dropdown in the panel header.
 `model` is for selection once `AT+CFG` has been read: the core's
 `Templates::select` prefers the first template (in name order) whose `model`
 fits the `AT+MODEL` value and falls back to `match`, because the advertised name
-of a Dragino NB node is usually its IMEI and says nothing about the model. The
-window does not call it yet.
+of a Dragino NB node is usually its IMEI and says nothing about the model.
+After a connect Aircord reads `AT+CFG` by itself. The guided view then takes its
+settings form from `Templates::select`, among the templates that have
+settings. The control panel switches to the template whose `model` fits, unless
+its template was picked by hand or came from a loaded session.
 
 ## Action types
 
@@ -194,8 +195,8 @@ mindestens 180 Sekunden eingeben." A line break in any value is refused.
 
 ### Reading, transferring, verifying
 
-What the core does (`rust/crates/core/src/transfer.rs`); the window will build
-on it:
+What the core does (`crates/core/src/transfer.rs`); the guided view's transfer
+bar runs it:
 
 1. `read_cfg` sends `AT+CFG` and reads every `AT+<KEY>=<value>` line up to `OK`.
    Blank lines, echoes, banners and the `Signal Strength:` lines a node prints
@@ -276,8 +277,8 @@ others from loading. The rules:
 ## Adding a template for new hardware
 
 1. Connect to the device and read the GATT dump in the terminal. If no known
-   UART profile is found, add its write/notify UUIDs to `uartProfiles` in
-   `internal/ble/ble.go` first.
+   UART profile is found, add its write/notify UUIDs to `PROFILES` in
+   `crates/ble/src/lib.rs` first.
 2. Work out the commands by hand in the console.
 3. Write the TOML into `<config>/aircord/templates/<something>.toml`.
 4. Reconnect. The template loads at startup, so restart Aircord after editing.

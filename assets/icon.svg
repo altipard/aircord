@@ -12,12 +12,8 @@
        canvas and the rest is transparent padding. Without that margin the icon
        sits larger than its neighbours in the Dock and loses the system shadow.
 
-       Only <path> and <circle> are used: the SVG is rasterized by oksvg (see
-       tools/genicon), which renders strokes and circles faithfully but drops the
-       corner radius on <rect rx="…">.
-
-       Source of truth: edit this SVG, then regenerate icon.png with
-       `go run ./tools/genicon`. -->
+       Source of truth: edit this SVG, then regenerate icon.png, e.g. with
+       `rsvg-convert -w 1024 -h 1024 assets/icon.svg -o assets/icon.png`. -->
 
   <!-- squircle: 412x412 centred in 512 -->
   <path d="M143 50 H369 A93 93 0 0 1 462 143 V369 A93 93 0 0 1 369 462

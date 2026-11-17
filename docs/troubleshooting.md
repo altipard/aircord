@@ -38,7 +38,7 @@ points at the adapter, `connect failed` at the device.
 The device does not expose a serial service Aircord recognises. The GATT dump
 above that line lists every service and characteristic found. If your device
 speaks a transparent-UART profile under different UUIDs, add them to
-`uartProfiles` in `internal/ble/ble.go`.
+`PROFILES` in `crates/ble/src/lib.rs`.
 
 Some devices expose their serial service only after authentication, so try again
 after the PIN has been accepted.
@@ -49,7 +49,7 @@ after the PIN has been accepted.
 If the link dropped during that window you get:
 
 ```
--- PIN skipped: link dropped during init --
+-- link dropped during init --
 ```
 
 Reconnect. If the device needs longer than four seconds, send the PIN by hand
@@ -65,7 +65,7 @@ input entirely. Wait for the current activity to finish and retry.
 ## A playbook aborts
 
 ```
--- playbook … aborted at step 3/7 (AT+APN=…): no reply matching OK --
+!! playbook … aborted at step 3/7 (AT+APN=…): no reply matching OK
 ```
 
 The step waited 15 seconds without a matching reply.

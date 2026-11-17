@@ -6,7 +6,7 @@ labels: enhancement
 ---
 
 **Problem**
-What are you trying to do that ble-console doesn't support today?
+What are you trying to do that Aircord doesn't support today?
 
 **Proposed solution**
 What should it do instead?

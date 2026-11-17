@@ -17,7 +17,7 @@ What you expected instead.
 
 **Environment**
 - OS + version:
-- ble-console version (release tag or commit):
+- Aircord version (release tag or commit):
 - Device / UART profile (Nordic / HM-10 / other):
 
 **Log output**
