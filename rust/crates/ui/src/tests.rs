@@ -65,9 +65,15 @@ fn s31() -> FakeLink {
 fn lay_connected(w: &mut World, name: &str) {
     press(&mut w.h, "Suchen");
     press(&mut w.h, "Stopp");
-    press(&mut w.h, name);
+    press_card(&mut w.h, name);
     press(&mut w.h, "Verbinden");
     settled(w);
+}
+
+/// Presses the device card of `name`: its label goes on with the signal or with "verbunden".
+fn press_card(h: &mut Harness<App>, name: &str) {
+    h.get_by_label_contains(&format!("{name}, ")).click();
+    run(h);
 }
 
 /// Waits for the connection and for the settings read that follows it.
@@ -674,6 +680,21 @@ fn the_status_line_and_an_error_mask_what_the_terminal_masks() {
 }
 
 #[test]
+fn a_device_card_names_its_signal_and_whether_it_is_connected() {
+    let link = s31();
+    link.add_nearby("bb", "Sensor 9", -80);
+    let mut w = lay(link, &[]);
+    press(&mut w.h, "Suchen");
+    press(&mut w.h, "Stopp");
+    assert!(has(&w, &format!("{S31_NAME}, Signal sehr gut")) && has(&w, "Sensor 9, Signal mittel"));
+    press_card(&mut w.h, S31_NAME);
+    press(&mut w.h, "Verbinden");
+    settled(&mut w);
+    run(&mut w.h);
+    assert!(has(&w, &format!("{S31_NAME}, verbunden")) && has(&w, "Sensor 9, Signal mittel"));
+}
+
+#[test]
 fn a_restart_without_a_link_says_so_and_sends_nothing() {
     let mut w = lay(s31(), &[]);
     lay_connected(&mut w, S31_NAME);
@@ -948,7 +969,7 @@ fn screenshot() {
         };
         press(&mut h, "Suchen");
         press(&mut h, "Stopp");
-        press(&mut h, S31_NAME);
+        press_card(&mut h, S31_NAME);
         shot(&mut h, "devices");
         press(&mut h, "Verbinden");
         wait(&mut h, "the settings", |a| a.guided.read == Read::Ready && a.guided.status.signal.is_some_and(|s| s.has_network()));

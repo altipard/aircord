@@ -610,7 +610,10 @@ impl App {
                 let name = if d.name.is_empty() { "Unbenanntes Gerät" } else { d.name.as_str() };
                 let is_sel = selected.as_deref() == Some(d.addr.as_str());
                 let is_linked = linked.as_deref() == Some(d.addr.as_str());
-                r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, pickable, is_sel, name));
+                let level = signal_level(d.rssi);
+                // What the card draws under the name belongs to its label: a screen reader gets no bars.
+                let state = if is_linked { "verbunden" } else { signal_word(level) };
+                r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, pickable, is_sel, format!("{name}, {state}")));
                 let (fill, stroke) = if is_sel {
                     (pal().select_fill, Stroke::new(1.0, pal().accent_border))
                 } else if r.hovered() && pickable {
@@ -623,7 +626,6 @@ impl App {
                 if r.has_focus() {
                     p.rect_stroke(rect, RADIUS_SM, Stroke::new(2.0, pal().accent), StrokeKind::Inside);
                 }
-                let level = signal_level(d.rssi);
                 let text_w = rect.width() - 20.0 - 30.0;
                 let upper = Rect::from_min_max(rect.min, pos2(rect.right(), rect.top() + 28.0));
                 let ink = if d.name.is_empty() { pal().muted } else { pal().text };
