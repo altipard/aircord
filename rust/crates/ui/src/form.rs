@@ -105,8 +105,9 @@ impl Form {
         match edit {
             Edit::Set(key, value) => {
                 self.cleared.remove(&key);
-                // An empty secret field is an untouched one.
-                if value.is_empty() && self.template.setting(&key).is_some_and(Setting::is_secret) {
+                // An empty secret field is an untouched one, and so is one that holds only blanks: nobody sees them
+                // in a masked field, and they must never empty a password. Emptying is `Edit::Clear`.
+                if value.trim().is_empty() && self.template.setting(&key).is_some_and(Setting::is_secret) {
                     self.edits.remove(&key);
                 } else {
                     self.edits.insert(key, value);
@@ -224,6 +225,9 @@ mod tests {
         assert_eq!(f.summary(), (1, true));
         set(&mut f, "PWD", "");
         assert_eq!((f.want("PWD"), f.summary()), (None, (0, true)), "emptied again: unchanged");
+        set(&mut f, "PWD", "   ");
+        assert_eq!((f.want("PWD"), f.summary()), (None, (0, true)), "blanks alone are no entry, and clear nothing");
+        assert!(f.plan().unwrap().is_empty());
         f.apply(Edit::Clear("PWD".into()));
         assert!(f.is_cleared("PWD"));
         assert_eq!(f.plan().unwrap().iter().map(Change::shown_cmd).collect::<Vec<_>>(), ["AT+PWD=******"]);
