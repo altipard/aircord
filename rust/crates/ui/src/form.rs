@@ -72,13 +72,6 @@ impl Form {
         self.cleared.contains(key)
     }
 
-    /// Every touched value, as [`transfer::plan`] takes them.
-    pub(crate) fn wanted(&self) -> BTreeMap<String, String> {
-        let mut all = self.edits.clone();
-        all.extend(self.cleared.iter().map(|k| (k.clone(), String::new())));
-        all
-    }
-
     /// The settings to show: those the device reported and whose condition holds, lay or expert ones.
     pub(crate) fn shown(&self, expert: bool) -> Vec<&Setting> {
         self.template.settings_for(&self.cfg, true).filter(|s| s.expert == expert && s.visible(|k| self.value_of(k))).collect()
@@ -128,8 +121,11 @@ impl Form {
                 self.cleared.remove(&key);
             }
             Edit::Clear(key) => {
-                self.edits.remove(&key);
-                self.cleared.insert(key);
+                // Only what the template lets be emptied: the plan refuses anything else, and so does the form.
+                if self.template.setting(&key).is_some_and(|s| s.clearable) {
+                    self.edits.remove(&key);
+                    self.cleared.insert(key);
+                }
             }
         }
     }
@@ -140,9 +136,10 @@ impl Form {
         self.cleared.clear();
     }
 
-    /// The commands a transfer would send.
+    /// The commands a transfer would send. What was typed goes in as wanted values, where an empty secret is no
+    /// change; what was emptied with "Löschen" goes in apart, the one way a secret is cleared.
     pub(crate) fn plan(&self) -> Result<Vec<Change>, Vec<FieldError>> {
-        transfer::plan(&self.template, &self.cfg, &self.wanted())
+        transfer::plan_clearing(&self.template, &self.cfg, &self.edits, &self.cleared)
     }
 
     /// After a transfer: the device's values as read back, and the entries that arrived are no longer changes. What
@@ -234,6 +231,10 @@ mod tests {
         assert_eq!(f.plan().unwrap()[0].cmd(), "AT+PWD=NULL");
         set(&mut f, "PWD", "x");
         assert!(!f.is_cleared("PWD"), "typing takes the clearing back");
+        f.reset_all();
+        f.apply(Edit::Clear("PWORD".into()));
+        assert!(!f.is_cleared("PWORD"), "the device password cannot be emptied");
+        assert_eq!((f.summary(), f.plan().unwrap().len()), ((0, true), 0));
     }
 
     #[test]
