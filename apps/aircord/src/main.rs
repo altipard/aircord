@@ -25,7 +25,7 @@ fn main() -> ExitCode {
     let app = App::new(Arc::new(link), Stores::open(), inbox);
     let mut viewport =
         eframe::egui::ViewportBuilder::default().with_title("Aircord").with_inner_size([1180.0, 760.0]).with_min_inner_size([900.0, 560.0]);
-    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../../assets/icon.png")) {
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon.png")) {
         viewport = viewport.with_icon(Arc::new(icon));
     }
     let options = eframe::NativeOptions { viewport, ..Default::default() };

@@ -388,7 +388,7 @@ type  = "select"
     }
 
     const S31_CFG: &str = include_str!("../testdata/s31-nb-v1.4.0-cfg.txt");
-    const INVENTORY: &str = include_str!("../../../../docs/devices/dragino-nb-at-commands.md");
+    const INVENTORY: &str = include_str!("../../../docs/devices/dragino-nb-at-commands.md");
 
     fn presets() -> Templates {
         Templates::load_from(Path::new("/nonexistent"))

@@ -6,6 +6,9 @@
 /blescan-app
 /ble-console
 
+# Cargo build output
+/target/
+
 # Packaging output (release workflow)
 /dist/
 *.app/
